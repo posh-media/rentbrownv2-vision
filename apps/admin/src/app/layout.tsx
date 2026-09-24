@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import { Plus_Jakarta_Sans, DM_Serif_Display } from "next/font/google";
 import "./globals.css";
 
+import { Providers } from "../components/providers";
+import { AdminShell } from "../components/layout/admin-shell";
+
 const plusJakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700", "800"],
@@ -17,12 +20,17 @@ const dmSerif = DM_Serif_Display({
 export const metadata: Metadata = {
   title: "RentBrown Admin",
   description: "RentBrown admin and operations",
+  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${plusJakarta.variable} ${dmSerif.variable}`}>
-      <body>{children}</body>
+      <body>
+        <Providers>
+          <AdminShell>{children}</AdminShell>
+        </Providers>
+      </body>
     </html>
   );
 }
