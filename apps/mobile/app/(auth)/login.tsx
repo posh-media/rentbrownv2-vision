@@ -5,16 +5,18 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { loginSchema, type LoginInput } from "@rentbrown/validation";
 
-import { useDataSource, useScenario } from "../../src/data/provider";
-import { Body, BodySm, Button, Field, H1, Screen, useToast } from "../../src/ui";
+import { useAuth, useDataSource, useScenario } from "../../src/data/provider";
+import { Body, BodySm, Button, Field, H1, Screen, StatePanel, useToast } from "../../src/ui";
 
 export default function Login() {
   const router = useRouter();
   const ds = useDataSource();
+  const auth = useAuth();
   const { setScenario } = useScenario();
   const { toast } = useToast();
   const qc = useQueryClient();
   const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
   const { control, handleSubmit } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
@@ -23,12 +25,18 @@ export default function Login() {
 
   const submit = handleSubmit(async (values) => {
     setBusy(true);
+    setError(null);
     try {
-      setScenario("default");
+      // ds.signIn goes through the live AuthGateway when Supabase is
+      // configured — invalid credentials, unverified email and disabled
+      // (SUSPENDED/CLOSED) accounts all reject with readable messages.
       await ds.signIn(values);
+      setScenario("default");
       await qc.invalidateQueries();
       toast("Welcome back");
       router.replace("/(tabs)/home");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Sign in failed — please try again.");
     } finally {
       setBusy(false);
     }
@@ -38,6 +46,7 @@ export default function Login() {
     <Screen padded bottomPad={24}>
       <H1 style={{ marginTop: 24 }}>Sign in</H1>
       <BodySm tone="muted">Access your portfolio, wallet and referrals.</BodySm>
+      {error ? <StatePanel tone="error" title="Couldn't sign you in" body={error} /> : null}
       <Controller
         control={control}
         name="email"
@@ -72,9 +81,11 @@ export default function Login() {
         onPress={() => router.push("/(auth)/forgot-password")}
       />
       <Button size="lg" fullWidth label="Sign in" loading={busy} onPress={() => void submit()} />
-      <BodySm tone="muted" center>
-        Prototype: any email + 8+ chars works.
-      </BodySm>
+      {auth ? null : (
+        <BodySm tone="muted" center>
+          Prototype build: any email + 8+ chars works.
+        </BodySm>
+      )}
       <Body center>
         <Button variant="ghost" label="Create an account" onPress={() => router.push("/(auth)/signup")} />
       </Body>

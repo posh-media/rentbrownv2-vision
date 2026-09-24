@@ -16,7 +16,7 @@ import type { NotificationLink } from "@rentbrown/types";
 
 import { InvestmentRow } from "../../../src/components/investment-card";
 import { OpportunityCard } from "../../../src/components/opportunity-card";
-import { useDashboard, useInvestments, useOpportunities } from "../../../src/data/hooks";
+import { useDashboard, useInvestments, useOpportunities, useProfile } from "../../../src/data/hooks";
 import { useSession } from "../../../src/data/provider";
 import { t } from "../../../src/theme";
 import {
@@ -36,6 +36,7 @@ import {
   Screen,
   Skeleton,
   SkeletonCard,
+  StatePanel,
 } from "../../../src/ui";
 
 function linkHref(link?: NotificationLink): string | null {
@@ -84,6 +85,7 @@ function GuestHero() {
 export default function Home() {
   const router = useRouter();
   const session = useSession();
+  const profile = useProfile();
   const dashboard = useDashboard();
   const investments = useInvestments();
   const opportunities = useOpportunities();
@@ -127,6 +129,15 @@ export default function Home() {
           </View>
         }
       />
+
+      {profile.data?.accountStatus === "RESTRICTED" ? (
+        <StatePanel
+          tone="warning"
+          icon={<CircleAlert size={16} color={t.status.warning.fg} />}
+          title="Your account is restricted"
+          body="Some actions may be unavailable while our team reviews your account. Contact support if this seems wrong."
+        />
+      ) : null}
 
       {dashboard.isLoading ? (
         <>

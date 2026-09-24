@@ -8,7 +8,7 @@ Sources inspected: `RENT_BROWN_MASTER_CONTEXT_AND_MEGA_AUDIT.md` (root), `posh-m
 
 ## 1. Current project assessment
 
-The canonical repository started **empty** apart from the master brief. Nothing to preserve, nothing to migrate. Every architectural decision below is deliberate for the new direction: **Turbo monorepo · Web + Mobile + Admin + Site · Firebase later · Vercel (web) · Expo (mobile)**.
+The canonical repository started **empty** apart from the master brief. Nothing to preserve, nothing to migrate. Every architectural decision below is deliberate for the new direction: **Turbo monorepo · Web + Mobile + Admin + Site · Supabase (Phase 2+) · Vercel (web) · Expo (mobile)**.
 
 ## 2. Vision repository assessment (`rentbrown-v2-vision`)
 
@@ -31,7 +31,7 @@ The canonical repository started **empty** apart from the master brief. Nothing 
 | Area | Old repo | Decision |
 | --- | --- | --- |
 | Repository role | Supabase + NestJS + Postgres + pg-boss worker monorepo, ~1 commit of skeleton apps | Historical reference only |
-| Backend | Postgres ledger, NestJS API, Supabase Auth, Smile Identity, Paystack/Korapay | **Not carried forward.** Firebase is the direction; no backend in Phase 1 |
+| Backend | Postgres ledger, NestJS API, Supabase Auth, Smile Identity, Paystack/Korapay | **Not carried forward.** Backend direction is Supabase (D-002); no backend in Phase 1 |
 | Monorepo | pnpm + Turborepo, `apps/{mobile,web,admin,site,api,worker}`, `packages/{domain,types,validation,config,design-tokens,api-client,providers,database,ui}` | Learn from layout; drop `api`, `worker`, `api-client`, `providers`, `database`, `domain` |
 | Design tokens | Brand 50–900 scale, warm neutrals, semantic light/dark maps, type scale, `tokensToCssVars` | **Concept reused**, re-authored with glass, chart, six-tone status vocabulary and the brief's five anchors fixed |
 | Types | `Property → InvestmentPlan → InvestmentRound → Investment`, wallet accounts `AVAILABLE/RESERVED/BONUS/BONUS_PENDING`, minor-unit strings, bps | **Vocabulary reused**, reshaped as UI read-models (`@rentbrown/types`) |
@@ -62,7 +62,7 @@ apps/mobile  Investor Mobile — Expo SDK 57, expo-router, RN StyleSheet + token
 apps/admin   Admin/Operations — Next.js boundary shell (dense operational layout, sparse glass)
 apps/site    Marketing — Next.js boundary shell (editorial landing composition)
 packages/design-tokens  tokens.ts + theme.css + css-var emitter
-packages/types          read-model contracts + InvestorDataSource interface (the Firebase seam)
+packages/types          read-model contracts + InvestorDataSource interface (the backend seam)
 packages/utils          money/date/status display formatting (platform-neutral)
 packages/mock-data      fixtures + createMockDataSource({ scenario, latencyMs, failing })
 packages/validation     zod form schemas shared by web + mobile
@@ -82,12 +82,12 @@ packages/config         tsconfig + eslint presets
 
 pnpm 9 workspaces (`apps/*`, `packages/*`), Turborepo tasks `build · dev · lint · typecheck · test`. Packages are consumed as TypeScript source (no `dist`), transpiled by Next (`transpilePackages`) and Metro. `.npmrc` uses `node-linker=hoisted` for Expo compatibility. Each Next app builds standalone from the root → Vercel project per app with root directory `apps/<name>`.
 
-## 7. Firebase compatibility plan
+## 7. Backend compatibility plan (Supabase — supersedes the original Firebase plan)
 
-- The **only** seam is `InvestorDataSource` (`@rentbrown/types`). Phase 2 implements `createFirebaseDataSource()` with Firebase Auth (session), Firestore read projections (dashboard, wallet, investments), Storage (KYC docs later), and Cloud Functions for every write (`quoteInvestment`, `submitInvestment`, `requestWithdrawal`, `createDeposit`) so the client never mutates financial state.
-- Types already use integer minor units, bps, ISO UTC strings — Firestore-friendly, float-free.
+- The **only** seam is `InvestorDataSource` (`@rentbrown/types`). Phase 2 implemented `createSupabaseInvestorDataSource()` — real Supabase Auth session + `public.profiles` — with domain reads delegated to the mock source until per-domain Postgres adapters arrive. Server-authoritative writes remain the rule so the client never mutates financial state.
+- Types already use integer minor units, bps, ISO UTC strings — Postgres-friendly, float-free.
 - Idempotency keys are generated client-side for every mutation input.
-- No Firebase SDK, config, or fake integration is present in Phase 1.
+- Historical note: this section originally planned Firebase. Superseded by `docs/DECISIONS.md` D-002 (Supabase + PostgreSQL).
 
 ## 8. UI screen inventory
 

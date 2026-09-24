@@ -7,6 +7,7 @@
  * `naira()`; the anchor "now" is the shared MOCK_NOW (2026-09-24T10:00Z).
  * Catalogue rows are DERIVED from `./catalogue` — never duplicated.
  */
+import { ADMIN_ROLE_DEFINITIONS } from "@rentbrown/types";
 import type {
   AccountStatus,
   AdminActor,
@@ -32,7 +33,6 @@ import type {
   ReportBundle,
   RewardGrantRow,
   RoleDefinition,
-  Permission,
   AdminRole,
   WalletAccountType,
   MinorUnits,
@@ -49,99 +49,10 @@ const DAY = 24 * HOUR;
 const before = (ms: number) => new Date(new Date(MOCK_NOW).getTime() - ms).toISOString();
 
 // ── RBAC ─────────────────────────────────────────────────────────────────────
+// Role vocabulary lives in @rentbrown/types (ADMIN_ROLE_DEFINITIONS); the mock
+// re-exports it so fixture consumers and real adapters share one source.
 
-const ALL_PERMISSIONS: Permission[] = [
-  "users.read",
-  "users.manage_status",
-  "kyc.read",
-  "kyc.review",
-  "catalogue.read",
-  "catalogue.manage",
-  "rounds.manage",
-  "investments.read",
-  "finance.read",
-  "finance.review_withdrawals",
-  "finance.reconcile",
-  "referrals.read",
-  "referrals.manage",
-  "notifications.read",
-  "notifications.manage",
-  "policies.read",
-  "policies.propose",
-  "audit.read",
-  "reports.read",
-  "legal.manage",
-  "admin.manage_roles",
-];
-
-export const roleDefinitions: RoleDefinition[] = [
-  {
-    role: "SUPPORT",
-    label: "Support",
-    description: "Read-only access across operations screens for customer support. Cannot take actions.",
-    permissions: [
-      "users.read",
-      "kyc.read",
-      "catalogue.read",
-      "investments.read",
-      "finance.read",
-      "referrals.read",
-      "notifications.read",
-      "policies.read",
-      "audit.read",
-      "reports.read",
-    ],
-  },
-  {
-    role: "KYC_REVIEWER",
-    label: "KYC reviewer",
-    description: "Reviews identity submissions and can approve, reject or request more information.",
-    permissions: ["users.read", "kyc.read", "kyc.review"],
-  },
-  {
-    role: "OPERATIONS_ADMIN",
-    label: "Operations admin",
-    description: "Runs the catalogue, rounds, referrals and notification templates.",
-    permissions: [
-      "users.read",
-      "kyc.read",
-      "catalogue.read",
-      "catalogue.manage",
-      "rounds.manage",
-      "investments.read",
-      "referrals.read",
-      "referrals.manage",
-      "notifications.read",
-      "notifications.manage",
-      "policies.read",
-      "reports.read",
-    ],
-  },
-  {
-    role: "FINANCE_ADMIN",
-    label: "Finance admin",
-    description: "Reviews withdrawals, watches reconciliation and reads user/KYC context.",
-    permissions: [
-      "users.read",
-      "kyc.read",
-      "investments.read",
-      "finance.read",
-      "finance.review_withdrawals",
-      "finance.reconcile",
-      "referrals.read",
-      "notifications.read",
-      "policies.read",
-      "audit.read",
-      "reports.read",
-    ],
-  },
-  {
-    role: "SUPER_ADMIN",
-    label: "Super admin",
-    description: "Full access including role management and policy proposals.",
-    permissions: ALL_PERMISSIONS,
-  },
-];
+export const roleDefinitions: RoleDefinition[] = ADMIN_ROLE_DEFINITIONS;
 
 export const adminActors: Record<AdminRole, AdminActor> = {
   SUPPORT: {

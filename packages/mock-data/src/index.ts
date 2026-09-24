@@ -1,7 +1,7 @@
 /**
  * @rentbrown/mock-data — realistic, clearly fictional fixtures and an
- * in-memory `InvestorDataSource` for Phase 1. Replaced by a Firebase-backed
- * adapter in a later phase; the UI depends only on the interface.
+ * in-memory `InvestorDataSource` for Phase 1. Replaced by per-domain
+ * Supabase adapters in later phases; the UI depends only on the interface.
  */
 export { createMockDataSource, MockNetworkError, type MockDataSourceOptions } from "./mock-data-source";
 export { createPublicCatalogueSource } from "./public-catalogue";

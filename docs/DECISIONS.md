@@ -20,3 +20,34 @@ investment limits, deposit amounts) are unchanged.
 
 Status: accepted · Scope: `ReferralPolicy` in `@rentbrown/types`, mock fixtures,
 referral surfaces on web and mobile.
+
+## D-002 Backend = Supabase + PostgreSQL (supersedes Firebase) (2026-09)
+
+**Supabase is the official backend direction for RentBrown V2.** The Phase 0/1
+plan anticipated Firebase; that direction is superseded — no Firebase code was
+ever written, so nothing is removed, only re-pointed.
+
+Concretely:
+
+- **Auth:** Supabase Auth (email+password; email confirmation honoured).
+- **Database:** Supabase PostgreSQL. Identity foundation lives in
+  `public.profiles` (username, display name, account status, referral code,
+  `referred_by`) and `public.admin_roles` (role grants — never an `isAdmin`
+  flag). Migrations: `supabase/migrations/*.sql` applied by
+  `scripts/migrate.mjs` against `DATABASE_URL`.
+- **Authorization:** Row Level Security, least privilege. Users read their own
+  profile and may update only `username`, `display_name`, `phone`; status and
+  referral fields are server-managed. `admin_roles` is service-role write only;
+  clients can read just their own grant.
+- **Client architecture:** `@rentbrown/supabase` — `AuthGateway` (identity
+  seam), `createSupabaseInvestorDataSource` (real auth + delegated domain
+  reads), `resolveAdminActor`. Next.js apps use `@supabase/ssr` cookie
+  sessions + `proxy.ts`; mobile uses `supabase-js` + AsyncStorage.
+- **Data-source strategy:** `InvestorDataSource`/`AdminDataSource`/`PublicCatalogueSource`
+  remain the app-facing interfaces. Auth methods are real; domain reads stay
+  mock until the domain phases (Phase 3+) replace them adapter-by-adapter.
+- **Deferred:** Supabase Storage (property evidence — Phase 11) and Edge
+  Functions (server-authoritative writes — Phases 4+).
+
+Status: accepted · Scope: `packages/supabase`, `supabase/migrations`, env
+architecture, auth surfaces on web/mobile/admin.

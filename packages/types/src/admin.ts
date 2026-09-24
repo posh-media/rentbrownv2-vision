@@ -85,6 +85,108 @@ export interface RoleDefinition {
   permissions: Permission[];
 }
 
+/** Every permission — vocabulary constant, not data. */
+export const ALL_PERMISSIONS: Permission[] = [
+  "users.read",
+  "users.manage_status",
+  "kyc.read",
+  "kyc.review",
+  "catalogue.read",
+  "catalogue.manage",
+  "rounds.manage",
+  "investments.read",
+  "finance.read",
+  "finance.review_withdrawals",
+  "finance.reconcile",
+  "referrals.read",
+  "referrals.manage",
+  "notifications.read",
+  "notifications.manage",
+  "policies.read",
+  "policies.propose",
+  "audit.read",
+  "reports.read",
+  "legal.manage",
+  "admin.manage_roles",
+];
+
+/**
+ * Canonical role → permission bundles. Phase 2 resolves admin actors from
+ * `public.admin_roles` + this map; Phase 10 may move bundles to the database.
+ */
+export const ADMIN_ROLE_DEFINITIONS: RoleDefinition[] = [
+  {
+    role: "SUPPORT",
+    label: "Support",
+    description: "Read-only access across operations screens for customer support. Cannot take actions.",
+    permissions: [
+      "users.read",
+      "kyc.read",
+      "catalogue.read",
+      "investments.read",
+      "finance.read",
+      "referrals.read",
+      "notifications.read",
+      "policies.read",
+      "audit.read",
+      "reports.read",
+    ],
+  },
+  {
+    role: "KYC_REVIEWER",
+    label: "KYC reviewer",
+    description: "Reviews identity submissions and can approve, reject or request more information.",
+    permissions: ["users.read", "kyc.read", "kyc.review"],
+  },
+  {
+    role: "OPERATIONS_ADMIN",
+    label: "Operations admin",
+    description: "Runs the catalogue, rounds, referrals and notification templates.",
+    permissions: [
+      "users.read",
+      "kyc.read",
+      "catalogue.read",
+      "catalogue.manage",
+      "rounds.manage",
+      "investments.read",
+      "referrals.read",
+      "referrals.manage",
+      "notifications.read",
+      "notifications.manage",
+      "policies.read",
+      "reports.read",
+    ],
+  },
+  {
+    role: "FINANCE_ADMIN",
+    label: "Finance admin",
+    description: "Reviews withdrawals, watches reconciliation and reads user/KYC context.",
+    permissions: [
+      "users.read",
+      "kyc.read",
+      "investments.read",
+      "finance.read",
+      "finance.review_withdrawals",
+      "finance.reconcile",
+      "referrals.read",
+      "notifications.read",
+      "policies.read",
+      "audit.read",
+      "reports.read",
+    ],
+  },
+  {
+    role: "SUPER_ADMIN",
+    label: "Super admin",
+    description: "Full access including role management and policy proposals.",
+    permissions: ALL_PERMISSIONS,
+  },
+];
+
+export const ADMIN_PERMISSIONS_BY_ROLE: Record<AdminRole, Permission[]> = Object.fromEntries(
+  ADMIN_ROLE_DEFINITIONS.map((d) => [d.role, d.permissions]),
+) as Record<AdminRole, Permission[]>;
+
 // ── Common list plumbing ─────────────────────────────────────────────────────
 
 export interface Page<T> {

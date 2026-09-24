@@ -4,12 +4,9 @@ import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { useSession } from "./data/hooks";
+import { isGuestRoute } from "./guest-routes";
 
-const GUEST_PREFIXES = ["/explore", "/opportunities", "/legal", "/how-it-works", "/faq", "/property-proof", "/company"];
-
-export function isGuestRoute(pathname: string): boolean {
-  return GUEST_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
-}
+export { isGuestRoute };
 
 /**
  * Redirects to /login when the session resolves to null. Returns the session

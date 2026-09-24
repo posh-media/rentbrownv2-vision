@@ -20,25 +20,26 @@ Output: `docs/PHASE0_REPORT.md`, monorepo foundation, shared contracts.
 | Marketing Site (`apps/site`, Next.js) | Complete — editorial public site, SSR + SEO |
 | Shared | Design system, mock data, shared types, responsive system, SEO/SSR foundation, Vercel-ready monorepo |
 
-No backend, Firebase, payments, KYC provider or ledger exists. All data is
-mock `DataSource` implementations behind typed interfaces.
+Phase 1 shipped with no backend, payments, KYC provider or ledger — all data
+was mock `DataSource` implementations behind typed interfaces.
 
-## PHASE 2 — Authentication + Firebase Backend Foundation — NEXT
+## PHASE 2 — Supabase Foundation + Authentication — CURRENT
 
-Firebase project integration, Firebase Auth (registration, login, logout,
-session handling, email verification, password reset), user/profile records,
-username, referral-code foundation, account status, authentication guards,
-server-side authorization, Firestore architecture, Cloud Functions /
-server-side operations, secure data access, environment configuration,
-initial security rules, and the backend architecture future financial
-operations require.
+Supabase project integration, Supabase Auth (registration, login, logout,
+session handling, email verification, password reset/change), `public.profiles`
+(username, display name, account status, referral code, `referred_by`),
+`public.admin_roles` RBAC foundation, least-privilege RLS, `@rentbrown/supabase`
+gateway + adapters, cookie sessions on web (`@supabase/ssr` + `proxy.ts`),
+AsyncStorage sessions on mobile, environment architecture, `scripts/migrate.mjs`.
+Financial logic intentionally deferred. See `docs/DECISIONS.md` D-002.
 
-## PHASE 3 — Core Domain & Firestore Data Model
+## PHASE 3 — Core Domain & PostgreSQL Data Model — NEXT
 
 users, profiles, properties, property evidence, investment plans, investment
 rounds, investments, wallets, transactions, deposits, withdrawals, referrals,
-rewards, notifications, policies, audit logs. Exact order finalised during
-Phase 2 review.
+rewards, notifications, policies, audit logs — schema + RLS + adapter swap-ins
+for the domain halves of `InvestorDataSource`/`AdminDataSource`. Exact order
+finalised during Phase 2 review.
 
 ## PHASE 4 — Ledger + Wallet
 
@@ -92,6 +93,6 @@ privilege escalation, recovery scenarios.
 
 ## PHASE 13 — Production Deployment + Launch
 
-Firebase production configuration, Vercel production, mobile production
+Supabase production configuration, Vercel production, mobile production
 builds, domains, environment variables, monitoring, backups, security review,
 controlled rollout, production verification.

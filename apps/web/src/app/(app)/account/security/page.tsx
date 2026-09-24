@@ -9,6 +9,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  Field,
+  Input,
   PinInput,
   StatePanel,
   StatusPill,
@@ -20,6 +22,7 @@ import { formatDateTime, formatRelativeDays } from "@rentbrown/utils";
 import { MOCK_NOW } from "@rentbrown/mock-data";
 
 import { useProfile } from "../../../../lib/data/hooks";
+import { useAuth } from "../../../../lib/data/provider";
 import { useRequireSession } from "../../../../lib/session";
 import { PageHeader } from "../../../../components/layout/page-header";
 import { PageSkeleton } from "../../../../components/layout/page-skeleton";
@@ -27,10 +30,43 @@ import { PageSkeleton } from "../../../../components/layout/page-skeleton";
 export default function SecurityPage() {
   const session = useRequireSession();
   const profile = useProfile();
+  const auth = useAuth();
   const [pinOpen, setPinOpen] = React.useState(false);
   const [pwOpen, setPwOpen] = React.useState(false);
   const [pin1, setPin1] = React.useState("");
   const [pin2, setPin2] = React.useState("");
+  const [pw1, setPw1] = React.useState("");
+  const [pw2, setPw2] = React.useState("");
+  const [pwBusy, setPwBusy] = React.useState(false);
+  const [pwError, setPwError] = React.useState<string | null>(null);
+
+  const submitPassword = async () => {
+    setPwError(null);
+    if (!auth) {
+      toast.info("Password changes need a signed-in Supabase session (demo mode has none).");
+      return;
+    }
+    if (pw1.length < 8) {
+      setPwError("Use at least 8 characters.");
+      return;
+    }
+    if (pw1 !== pw2) {
+      setPwError("Passwords do not match.");
+      return;
+    }
+    setPwBusy(true);
+    try {
+      await auth.updatePassword(pw1);
+      setPwOpen(false);
+      setPw1("");
+      setPw2("");
+      toast.success("Password updated");
+    } catch (e) {
+      setPwError(e instanceof Error ? e.message : "Couldn't update the password — try again.");
+    } finally {
+      setPwBusy(false);
+    }
+  };
 
   if (session.isPending || profile.isPending) return <PageSkeleton />;
   if (profile.isError || !profile.data) {
@@ -162,10 +198,24 @@ export default function SecurityPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Change password</DialogTitle>
-            <DialogDescription>Password changes arrive with the backend phase.</DialogDescription>
+            <DialogDescription>At least 8 characters. You stay signed in on this device.</DialogDescription>
           </DialogHeader>
+          <div className="flex flex-col gap-4">
+            {pwError ? <StatePanel tone="error" title="Couldn't update password" copy={pwError} /> : null}
+            <Field label="New password" htmlFor="pw1">
+              <Input id="pw1" type="password" autoComplete="new-password" value={pw1} onChange={(e) => setPw1(e.target.value)} />
+            </Field>
+            <Field label="Confirm new password" htmlFor="pw2">
+              <Input id="pw2" type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} />
+            </Field>
+          </div>
           <DialogFooter>
-            <Button onClick={() => setPwOpen(false)}>Got it</Button>
+            <Button variant="ghost" onClick={() => setPwOpen(false)}>
+              Cancel
+            </Button>
+            <Button disabled={pwBusy || pw1.length < 8 || pw1 !== pw2} onClick={() => void submitPassword()}>
+              {pwBusy ? "Updating…" : "Update password"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

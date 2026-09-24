@@ -1,7 +1,7 @@
 /**
  * Shared helpers for the marketing site. Server-safe: no window, no React.
  * All catalogue data flows through `createPublicCatalogueSource()` — the
- * future Firebase seam — never straight from fixture internals.
+ * published-catalogue seam — never straight from fixture internals.
  */
 import type { ProofDocumentStatus, StatusTone } from "@rentbrown/types";
 import { createPublicCatalogueSource } from "@rentbrown/mock-data";

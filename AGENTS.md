@@ -25,7 +25,8 @@ apps/mobile   Investor Mobile (Expo SDK 57, expo-router)           → EAS
 apps/admin    Admin / Operations (Next.js) — boundary shell
 apps/site     Marketing site (Next.js) — boundary shell
 packages/design-tokens  tokens.ts (source of truth) + theme.css (Tailwind v4 theme) + css var emitter
-packages/types          UI read-model contracts + `InvestorDataSource` (the future Firebase seam)
+packages/types          UI read-model contracts + `InvestorDataSource` (the backend seam)
+packages/supabase       `AuthGateway` + Supabase adapters (real auth; domain delegated to mock)
 packages/utils          platform-neutral display formatting (money, dates, status labels)
 packages/mock-data      fictional fixtures + `createMockDataSource({ scenario, latencyMs, failing })`
 packages/validation     zod form schemas shared by web + mobile
@@ -53,7 +54,9 @@ Packages are consumed as TypeScript source (no `dist`). `.npmrc` uses `node-link
 - Fonts: Plus Jakarta Sans for product UI; DM Serif Display only for marketing/display headings.
 - Do not share rendered components between Next.js and React Native. Share tokens/types/utils/mock-data/validation.
 - All fixture data is fictional and labelled as such. Never imply real properties, registrations or approvals.
-- **Out of scope until approved:** Firebase, any backend/auth SDK, payment/KYC providers, ledger or financial logic.
+- Backend: Supabase + PostgreSQL (DECISIONS D-002). Auth/profiles/RBAC foundation live;
+  domain data still mock until per-domain adapters land. Out of scope until approved:
+  payment/KYC providers, ledger or financial logic.
 
 ## Mock scenarios
 

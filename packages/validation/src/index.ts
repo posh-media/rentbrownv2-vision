@@ -10,8 +10,14 @@ export const loginSchema = z.object({
   password: z.string().min(8),
 });
 
+/** Username: 3–20 chars, [a-z0-9_], starts with a letter or digit. DB enforces uniqueness + reserved names. */
+const username = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9_]{2,19}$/, "3–20 characters: lowercase letters, digits, underscores");
+
 export const signupSchema = z.object({
   fullName: z.string().min(1),
+  username,
   email: z.email(),
   phone: nigerianPhone,
   password: z.string().min(8),

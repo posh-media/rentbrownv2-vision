@@ -28,11 +28,18 @@ the Vercel project env settings — never commit real values.
 
 | App | Variable | Purpose |
 | --- | --- | --- |
+| `apps/web` | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL (public — RLS is the guard) |
+| `apps/web` | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/publishable key (public) |
 | `apps/web` | `NEXT_PUBLIC_WEB_URL` | Canonical origin (metadata, canonical tags) |
 | `apps/web` | `NEXT_PUBLIC_SITE_URL` | Marketing-site origin for cross-links |
+| `apps/admin` | `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase (public) |
 | `apps/site` | `NEXT_PUBLIC_SITE_URL` | Canonical origin |
 | `apps/site` | `NEXT_PUBLIC_WEB_URL` | Investor-app origin for Sign in / Get started |
-| `apps/admin` | — | none |
+| `apps/mobile` | `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Supabase — bundled into the app (public; RLS is the guard). Set in `apps/mobile/.env` for local dev and in the EAS project for builds |
+
+Server-only secrets live outside app env: `SUPABASE_SERVICE_ROLE_KEY` and
+`DATABASE_URL` belong to the repo-root `.env` (migrations, seeding) — never in
+`NEXT_PUBLIC_*`/`EXPO_PUBLIC_*` vars, Vercel project envs, or bundles.
 
 `apps/admin` also emits `robots: { index: false }` on every page — keep it
 that way; additionally consider Vercel Deployment Protection for the admin

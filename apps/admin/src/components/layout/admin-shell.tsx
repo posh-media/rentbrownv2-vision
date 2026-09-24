@@ -3,11 +3,11 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Input, cn } from "@rentbrown/ui";
-import { Search } from "lucide-react";
+import { Button, Input, cn } from "@rentbrown/ui";
+import { LogOut, Search } from "lucide-react";
 
 import { NAV } from "../../lib/nav";
-import { usePermissions } from "../../lib/data/provider";
+import { useAdminAuth, usePermissions } from "../../lib/data/provider";
 import { ActorChip, RoleSwitcher } from "../role-switcher";
 
 function NavLink({ item, pathname }: { item: (typeof NAV)[number]["items"][number]; pathname: string }) {
@@ -33,6 +33,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { has, ready } = usePermissions();
+  const { mode, signOut } = useAdminAuth();
   const [search, setSearch] = React.useState("");
 
   const groups = NAV.map((g) => ({
@@ -91,8 +92,23 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             />
           </form>
           <div className="ml-auto flex items-center gap-3">
+            {mode === "demo" ? (
+              <span className="rounded-md border border-warning-border bg-warning-subtle px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-warning-foreground">
+                Demo mode
+              </span>
+            ) : null}
             <RoleSwitcher />
             <ActorChip />
+            {mode === "supabase" ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label="Sign out"
+                onClick={() => void signOut().then(() => router.replace("/login"))}
+              >
+                <LogOut className="size-4" />
+              </Button>
+            ) : null}
           </div>
         </header>
         <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-5 lg:px-6 lg:py-6">{children}</main>

@@ -1,8 +1,8 @@
 /**
  * @rentbrown/types — shared, platform-neutral view-model contracts.
  *
- * These describe what the UI RENDERS. They are read projections that a
- * trusted backend (Firebase in a later phase) will produce. The client never
+ * These describe what the UI RENDERS. They are read projections that the
+ * trusted backend (Supabase/PostgreSQL) produces. The client never
  * derives authoritative balances, capacity, profit, eligibility or status from
  * these shapes — it only displays them and collects intent.
  *
@@ -517,7 +517,7 @@ export interface Notification {
 
 // ── Account / profile / security ─────────────────────────────────────────────
 
-export type AccountStatus = "ACTIVE" | "RESTRICTED" | "SUSPENDED";
+export type AccountStatus = "ACTIVE" | "RESTRICTED" | "SUSPENDED" | "CLOSED";
 
 export interface SessionDevice {
   id: string;
@@ -561,9 +561,73 @@ export interface UserProfile {
 export interface Session {
   userId: string;
   displayName: string;
-  /** Mock only. Real sessions arrive from Firebase Auth in a later phase. */
   issuedAt: ISODateString;
 }
+
+// ── Authentication foundation (Supabase — Phase 2) ───────────────────────────
+
+/**
+ * Application-level profile. Identity lives in `auth.users`; this is the
+ * `public.profiles` row keyed by the same id. Financial data never lives here.
+ */
+export interface AppProfile {
+  id: string;
+  username: string;
+  displayName: string;
+  email: string;
+  phone: string | null;
+  accountStatus: AccountStatus;
+  referralCode: string;
+  referredBy: string | null;
+  emailVerified: boolean;
+  createdAt: ISODateString;
+  updatedAt: ISODateString;
+}
+
+export interface SignUpResult {
+  /**
+   * True when the project requires email confirmation — the user has an
+   * account but NO session yet and must verify before signing in.
+   */
+  requiresEmailConfirmation: boolean;
+  userId: string;
+}
+
+export interface RequestPasswordResetInput {
+  email: string;
+  /** Absolute URL the recovery link should land on (web) or deep-link (mobile). */
+  redirectTo?: string;
+}
+
+/**
+ * Identity seam — implemented by `@rentbrown/supabase` (Supabase Auth +
+ * `public.profiles`) and by the mock gateway for tests/scenarios. Apps talk
+ * to THIS, never to Supabase calls scattered through screens.
+ */
+export interface AuthGateway {
+  /**
+   * Current auth user + app profile, or null when signed out. `profile` is
+   * null when the user exists but the profile row is not yet provisioned.
+   */
+  getAuthState(): Promise<{ session: Session; profile: AppProfile | null } | null>;
+  signIn(input: SignInInput): Promise<{ session: Session; profile: AppProfile }>;
+  signUp(input: SignUpInput): Promise<SignUpResult>;
+  signOut(): Promise<void>;
+  requestPasswordReset(input: RequestPasswordResetInput): Promise<void>;
+  /** New password for the signed-in user (post-login or recovery session). */
+  updatePassword(newPassword: string): Promise<void>;
+  /** Re-read the profile row (account status can change server-side). */
+  getProfile(): Promise<AppProfile | null>;
+  /** Subscribe to SIGNED_IN/SIGNED_OUT/TOKEN_REFRESHED/PASSWORD_RECOVERY. */
+  onAuthStateChange(cb: (event: AuthChangeEvent) => void): () => void;
+}
+
+export type AuthChangeEvent =
+  | "SIGNED_IN"
+  | "SIGNED_OUT"
+  | "TOKEN_REFRESHED"
+  | "USER_UPDATED"
+  | "PASSWORD_RECOVERY";
 
 // ── Dashboard projection ─────────────────────────────────────────────────────
 
@@ -669,7 +733,7 @@ export interface ContentBundle {
   trustPillars: Array<{ title: string; body: string }>;
 }
 
-// ── Data source contract (the future Firebase seam) ──────────────────────────
+// ── Data source contract (the backend seam — Supabase adapters) ──────────────
 
 export interface SignInInput {
   email: string;
@@ -678,6 +742,7 @@ export interface SignInInput {
 
 export interface SignUpInput {
   fullName: string;
+  username: string;
   email: string;
   phone: string;
   password: string;
@@ -706,7 +771,8 @@ export interface RequestWithdrawalInput {
 
 /**
  * Everything the investor apps read or ask for. Implemented today by
- * `@rentbrown/mock-data`; later by a Firebase-backed adapter. Screens depend
+ * `@rentbrown/mock-data` for domain data and `@rentbrown/supabase` for
+ * identity/session; later by per-domain Supabase adapters. Screens depend
  * on THIS interface, never on a concrete implementation.
  */
 export interface InvestorDataSource {
@@ -763,8 +829,8 @@ export interface InvestorDataSource {
 /**
  * Read-only, unauthenticated catalogue for server rendering (marketing site,
  * public explore/opportunity pages). Safe to call from React Server
- * Components and build-time generation. Later implemented by a Firebase Admin
- * SDK / published-catalogue adapter; today by `@rentbrown/mock-data`.
+ * Components and build-time generation. Later implemented by a published-
+ * catalogue view over Supabase/PostgreSQL; today by `@rentbrown/mock-data`.
  */
 export interface PublicCatalogueSource {
   listOpportunities(filter?: OpportunityFilter): Promise<Opportunity[]>;

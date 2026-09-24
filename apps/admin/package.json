@@ -10,17 +10,24 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@hookform/resolvers": "^5.9.1",
     "@rentbrown/design-tokens": "workspace:*",
     "@rentbrown/mock-data": "workspace:*",
+    "@rentbrown/supabase": "workspace:^",
     "@rentbrown/types": "workspace:*",
     "@rentbrown/ui": "workspace:*",
     "@rentbrown/utils": "workspace:*",
+    "@rentbrown/validation": "workspace:^",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.117.1",
     "@tanstack/react-query": "^5.103.0",
     "lucide-react": "^1.48.0",
     "next": "16.3.6",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "vaul": "^1.1.0"
+    "react-hook-form": "^7.88.0",
+    "vaul": "^1.1.0",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.0",

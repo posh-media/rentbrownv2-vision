@@ -3,7 +3,6 @@ import { Plus_Jakarta_Sans, DM_Serif_Display } from "next/font/google";
 import "./globals.css";
 
 import { Providers } from "../components/providers";
-import { AdminShell } from "../components/layout/admin-shell";
 
 const plusJakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -27,9 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${plusJakarta.variable} ${dmSerif.variable}`}>
       <body>
-        <Providers>
-          <AdminShell>{children}</AdminShell>
-        </Providers>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

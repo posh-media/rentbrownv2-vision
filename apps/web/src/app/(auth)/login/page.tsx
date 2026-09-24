@@ -9,14 +9,19 @@ import { Eye, EyeOff } from "lucide-react";
 import { Button, Field, Input, StatePanel, toast } from "@rentbrown/ui";
 import { loginSchema, type LoginInput } from "@rentbrown/validation";
 
+import { useQueryClient } from "@tanstack/react-query";
+
 import { useSignIn } from "../../../lib/data/hooks";
 
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
+  const queryClient = useQueryClient();
   const signIn = useSignIn();
   const [showPassword, setShowPassword] = React.useState(false);
-  const [formError, setFormError] = React.useState<string | null>(null);
+  const [formError, setFormError] = React.useState<string | null>(
+    params.get("error") === "link" ? "That link is invalid or has expired — sign in or request a new one." : null,
+  );
 
   const {
     register,
@@ -28,6 +33,8 @@ function LoginForm() {
     setFormError(null);
     try {
       await signIn.mutateAsync(values);
+      // Fresh session — drop anything cached under a previous identity.
+      queryClient.clear();
       toast.success("Welcome back");
       router.replace(params.get("next") ?? "/dashboard");
     } catch (e) {
@@ -77,9 +84,6 @@ function LoginForm() {
         </Button>
       </form>
 
-      <p className="mt-4 text-xs text-muted-foreground">
-        Prototype: any email and an 8+ character password signs you in.
-      </p>
       <p className="mt-6 text-sm text-muted-foreground">
         New to RentBrown?{" "}
         <Link href="/signup" className="font-bold text-primary hover:underline">

@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
     "@rentbrown/types",
     "@rentbrown/utils",
     "@rentbrown/mock-data",
+    "@rentbrown/supabase",
     "@rentbrown/validation",
   ],
   images: {

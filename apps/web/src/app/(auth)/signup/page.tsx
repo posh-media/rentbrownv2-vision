@@ -15,6 +15,7 @@ function SignupForm() {
   const params = useSearchParams();
   const signUp = useSignUp();
   const [formError, setFormError] = React.useState<string | null>(null);
+  const [pendingEmail, setPendingEmail] = React.useState<string | null>(null);
 
   const {
     register,
@@ -33,9 +34,34 @@ function SignupForm() {
       toast.success("Account created — welcome to RentBrown");
       router.replace("/dashboard");
     } catch (e) {
+      // Supabase email confirmation enabled: account exists, no session yet.
+      if (e instanceof Error && (e as { code?: string }).code === "EMAIL_CONFIRMATION_REQUIRED") {
+        setPendingEmail(values.email);
+        return;
+      }
       setFormError(e instanceof Error ? e.message : "We couldn't create your account. Try again.");
     }
   });
+
+  if (pendingEmail) {
+    return (
+      <div>
+        <h1 className="text-3xl font-extrabold tracking-tight text-foreground">Check your inbox</h1>
+        <StatePanel
+          tone="info"
+          title="Verify your email to finish signing up"
+          copy={`We sent a confirmation link to ${pendingEmail}. Open it to activate your account, then sign in.`}
+          className="mt-5"
+        />
+        <p className="mt-6 text-sm text-muted-foreground">
+          Verified already?{" "}
+          <Link href="/login" className="font-bold text-primary hover:underline">
+            Sign in
+          </Link>
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -49,6 +75,14 @@ function SignupForm() {
       <form onSubmit={onSubmit} className="mt-6 flex flex-col gap-4" noValidate>
         <Field label="Full name" htmlFor="fullName" error={errors.fullName?.message}>
           <Input id="fullName" autoComplete="name" placeholder="Ada Lovelace" {...register("fullName")} />
+        </Field>
+        <Field
+          label="Username"
+          htmlFor="username"
+          hint="Letters, numbers, underscores — shown on your referral link"
+          error={errors.username?.message}
+        >
+          <Input id="username" autoComplete="username" placeholder="ada_ocha" {...register("username")} />
         </Field>
         <Field label="Email" htmlFor="email" error={errors.email?.message}>
           <Input id="email" type="email" autoComplete="email" placeholder="you@example.com" {...register("email")} />

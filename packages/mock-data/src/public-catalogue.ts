@@ -5,7 +5,7 @@
  * with their rounds (every status, including SCHEDULED and SOLD_OUT) so public
  * surfaces — marketing site, SEO'd explore/opportunity pages — can be rendered
  * on the server. Safe to import from React Server Components: no React, no
- * window, no mutable state. A Firebase Admin SDK adapter will replace this in
+ * window, no mutable state. A Supabase published-catalogue adapter replaces this in
  * a later phase without touching callers.
  */
 import type {

@@ -15,7 +15,7 @@ import { Check, ChevronsUpDown } from "lucide-react";
 import type { AdminRole } from "@rentbrown/types";
 
 import { useRoles } from "../lib/data/hooks";
-import { useActor, useRole } from "../lib/data/provider";
+import { useActor, useAdminAuth, useRole } from "../lib/data/provider";
 
 const ROLE_BADGE_TONE: Record<AdminRole, "info" | "warning" | "success" | "pending" | "neutral"> = {
   SUPPORT: "neutral",
@@ -25,10 +25,13 @@ const ROLE_BADGE_TONE: Record<AdminRole, "info" | "warning" | "success" | "pendi
   SUPER_ADMIN: "success",
 };
 
-/** Mock-only role switcher — recreates the data source with another role. */
+/** Demo-mode role switcher — hidden in Supabase mode where the role is server truth. */
 export function RoleSwitcher() {
+  const { mode } = useAdminAuth();
   const { role, setRole } = useRole();
   const { data: roles } = useRoles();
+
+  if (mode !== "demo") return null;
 
   const active = roles?.find((r) => r.role === role);
 
@@ -63,9 +66,10 @@ export function RoleSwitcher() {
   );
 }
 
-/** Actor chip for the top bar: initials, name, role badge, mock note. */
+/** Actor chip for the top bar: initials, name, role badge, session note. */
 export function ActorChip() {
   const { data: actor } = useActor();
+  const { mode } = useAdminAuth();
   const { role } = useRole();
   if (!actor) return <div className="h-9 w-40 animate-pulse rounded-md bg-surface-sunken" />;
   return (
@@ -75,7 +79,9 @@ export function ActorChip() {
       </span>
       <span className="hidden flex-col leading-tight md:flex">
         <span className="text-xs font-bold text-foreground">{actor.displayName}</span>
-        <span className="text-[10px] text-muted-foreground">Mock session · no real auth</span>
+        <span className="text-[10px] text-muted-foreground">
+          {mode === "demo" ? "Demo mode · no auth" : actor.email}
+        </span>
       </span>
       <StatusPill tone={ROLE_BADGE_TONE[role]} className="hidden lg:inline-flex">
         {role.replace("_", " ")}

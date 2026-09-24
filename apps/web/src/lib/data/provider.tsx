@@ -1,9 +1,14 @@
 "use client";
 
 import * as React from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import type { InvestorDataSource } from "@rentbrown/types";
+import type { AuthGateway, InvestorDataSource } from "@rentbrown/types";
 import { createMockDataSource, type MockScenario } from "@rentbrown/mock-data";
+import { createSupabaseInvestorDataSource } from "@rentbrown/supabase";
+
+import { getSupabaseBrowserClient } from "../supabase/client";
+import { isGuestRoute } from "../guest-routes";
 
 const SCENARIO_KEY = "rb.scenario";
 const LATENCY_KEY = "rb.latency";
@@ -56,8 +61,25 @@ const sameConfig = (
   b: { scenario: MockScenario; latency: number; failing: Array<keyof InvestorDataSource> },
 ) => a.scenario === b.scenario && a.latency === b.latency && a.failing.length === b.failing.length && a.failing.every((m, i) => m === b.failing[i]);
 
+/** Auth pages + the marketing/browse surface never trigger a sign-out bounce. */
+function isAuthPage(pathname: string): boolean {
+  return (
+    pathname === "/login" ||
+    pathname === "/signup" ||
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password" ||
+    pathname.startsWith("/auth/")
+  );
+}
+
+function isProtectedPath(pathname: string): boolean {
+  return pathname !== "/" && !isGuestRoute(pathname) && !isAuthPage(pathname);
+}
+
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const pathname = usePathname();
   // Server and first client render both use the default config — no hydration
   // mismatch. Stored overrides are applied in a mount effect.
   const [config, setConfig] = React.useState(DEFAULT_CONFIG);
@@ -86,15 +108,35 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     applyChange(DEFAULT_CONFIG, readStored());
   }, [applyChange]);
 
-  const source = React.useMemo(
-    () =>
-      createMockDataSource({
-        scenario: config.scenario,
-        latencyMs: config.latency,
-        failing: config.failing,
-      }),
-    [config],
-  );
+  const source = React.useMemo<InvestorDataSource & { auth?: AuthGateway }>(() => {
+    const domain = createMockDataSource({
+      scenario: config.scenario,
+      latencyMs: config.latency,
+      failing: config.failing,
+    });
+    // Real Supabase auth when configured — identity/session go through the
+    // gateway; every domain read still delegates to the mock source.
+    // getSupabaseBrowserClient() returns null when env is absent (demo mode).
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return domain;
+    return createSupabaseInvestorDataSource(supabase, domain);
+  }, [config]);
+
+  const auth = (source as { auth?: AuthGateway }).auth ?? null;
+
+  // Keep the React Query cache and route in sync with Supabase auth events.
+  React.useEffect(() => {
+    if (!auth) return;
+    return auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        queryClient.clear();
+        if (isProtectedPath(pathname)) router.replace("/login");
+      } else {
+        // SIGNED_IN / TOKEN_REFRESHED / USER_UPDATED / PASSWORD_RECOVERY.
+        queryClient.invalidateQueries();
+      }
+    });
+  }, [auth, queryClient, router, pathname]);
 
   const controls = React.useMemo<ScenarioControls>(
     () => ({
@@ -126,6 +168,16 @@ export function useDataSource(): InvestorDataSource {
   const ctx = React.useContext(DataSourceContext);
   if (!ctx) throw new Error("useDataSource must be used inside <DataProvider>");
   return ctx;
+}
+
+/**
+ * The real auth gateway, or null when Supabase env is not configured (pure
+ * prototype mode — mock session calls on the data source still work).
+ */
+export function useAuth(): AuthGateway | null {
+  const ctx = React.useContext(DataSourceContext);
+  if (!ctx) throw new Error("useAuth must be used inside <DataProvider>");
+  return (ctx as { auth?: AuthGateway }).auth ?? null;
 }
 
 export function useScenario(): ScenarioControls {

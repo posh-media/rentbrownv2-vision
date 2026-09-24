@@ -94,10 +94,15 @@ export default function Account() {
         label="Sign out"
         icon={<LogOut size={16} color={t.text.primary} />}
         onPress={async () => {
-          await ds.signOut();
-          await qc.invalidateQueries();
-          toast("Signed out");
-          router.replace("/(auth)/welcome");
+          try {
+            await ds.signOut();
+          } finally {
+            // Clear every cached domain query even if the network call failed;
+            // the (tabs) guard and this redirect both land on welcome.
+            qc.clear();
+            toast("Signed out");
+            router.replace("/(auth)/welcome");
+          }
         }}
       />
     </Screen>

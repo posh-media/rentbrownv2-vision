@@ -1,9 +1,10 @@
 /**
  * In-memory implementation of `InvestorDataSource`.
  *
- * Plays the role of the trusted backend for Phase 1: it "computes" quotes,
- * fees and eligibility so that screens never do. A Firebase-backed adapter
- * will replace this class in a later phase without touching the UI.
+ * Plays the role of the trusted backend for domain data: it "computes"
+ * quotes, fees and eligibility so that screens never do. Per-domain
+ * Supabase/PostgreSQL adapters replace it in later phases without touching
+ * the UI. (Firebase was superseded — see docs/DECISIONS.md.)
  */
 import type {
   DashboardSummary,
