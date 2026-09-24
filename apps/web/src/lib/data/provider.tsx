@@ -45,22 +45,46 @@ interface ScenarioControls {
 const DataSourceContext = React.createContext<InvestorDataSource | null>(null);
 const ScenarioContext = React.createContext<ScenarioControls | null>(null);
 
+const DEFAULT_CONFIG: { scenario: MockScenario; latency: number; failing: Array<keyof InvestorDataSource> } = {
+  scenario: "default",
+  latency: 450,
+  failing: [],
+};
+
+const sameConfig = (
+  a: { scenario: MockScenario; latency: number; failing: Array<keyof InvestorDataSource> },
+  b: { scenario: MockScenario; latency: number; failing: Array<keyof InvestorDataSource> },
+) => a.scenario === b.scenario && a.latency === b.latency && a.failing.length === b.failing.length && a.failing.every((m, i) => m === b.failing[i]);
+
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
-  const [config, setConfig] = React.useState<{ scenario: MockScenario; latency: number; failing: Array<keyof InvestorDataSource> }>({
-    scenario: "default",
-    latency: 450,
-    failing: [],
-  });
-  const [hydrated, setHydrated] = React.useState(false);
+  // Server and first client render both use the default config — no hydration
+  // mismatch. Stored overrides are applied in a mount effect.
+  const [config, setConfig] = React.useState(DEFAULT_CONFIG);
+
+  // The cache must be cleared BEFORE the source changes, not in an effect
+  // watching it: child effects run before parent effects, so a post-change
+  // clear() would destroy the freshly created queries and leave observers
+  // bound to dead queries (everything stuck pending).
+  const applyChange = React.useCallback(
+    (
+      current: { scenario: MockScenario; latency: number; failing: Array<keyof InvestorDataSource> },
+      next: { scenario: MockScenario; latency: number; failing: Array<keyof InvestorDataSource> },
+    ) => {
+      if (sameConfig(current, next)) return;
+      queryClient.clear();
+      setConfig(next);
+    },
+    [queryClient],
+  );
 
   React.useEffect(() => {
-    // Hydration gate: localStorage is only readable after mount; updating once
-    // here is intentional, so the cascading-render warning does not apply.
+    // localStorage is only readable after mount; updating once here is
+    // intentional, so the cascading-render warning does not apply. Config is
+    // still DEFAULT at this point, so compare stored values against it.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setConfig(readStored());
-    setHydrated(true);
-  }, []);
+    applyChange(DEFAULT_CONFIG, readStored());
+  }, [applyChange]);
 
   const source = React.useMemo(
     () =>
@@ -77,26 +101,19 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       ...config,
       setScenario: (scenario) => {
         window.localStorage.setItem(SCENARIO_KEY, scenario);
-        setConfig((c) => ({ ...c, scenario }));
+        applyChange(config, { ...config, scenario });
       },
       setLatency: (latency) => {
         window.localStorage.setItem(LATENCY_KEY, String(latency));
-        setConfig((c) => ({ ...c, latency }));
+        applyChange(config, { ...config, latency });
       },
       setFailing: (failing) => {
         window.localStorage.setItem(FAILING_KEY, JSON.stringify(failing));
-        setConfig((c) => ({ ...c, failing }));
+        applyChange(config, { ...config, failing });
       },
     }),
-    [config],
+    [config, applyChange],
   );
-
-  // A new source instance means a fresh backend — drop every cached query.
-  React.useEffect(() => {
-    queryClient.clear();
-  }, [source, queryClient]);
-
-  if (!hydrated) return null;
 
   return (
     <DataSourceContext.Provider value={source}>

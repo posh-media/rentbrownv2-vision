@@ -16,8 +16,28 @@ const dmSerif = DM_Serif_Display({
 });
 
 export const metadata: Metadata = {
-  title: "RentBrown",
-  description: "Nigerian property-investment platform",
+  metadataBase: new URL(process.env.NEXT_PUBLIC_WEB_URL ?? "http://localhost:3000"),
+  title: {
+    default: "RentBrown",
+    template: "%s · RentBrown",
+  },
+  description:
+    "Compare property-backed investment rounds in Nigeria — slot prices, expected returns, terms and reviewed evidence, shown plainly. Prototype build with fictional data.",
+  openGraph: {
+    type: "website",
+    siteName: "RentBrown",
+    title: "RentBrown",
+    description:
+      "Compare property-backed investment rounds in Nigeria — slot prices, expected returns, terms and reviewed evidence, shown plainly.",
+    images: ["/properties/ikoyi-residences.jpg"],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "RentBrown",
+    description:
+      "Compare property-backed investment rounds in Nigeria — slot prices, expected returns, terms and reviewed evidence, shown plainly.",
+    images: ["/properties/ikoyi-residences.jpg"],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

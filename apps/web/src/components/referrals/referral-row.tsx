@@ -1,8 +1,18 @@
 import { Avatar, MoneyFigure, StatusPill } from "@rentbrown/ui";
 import type { ReferralRecord } from "@rentbrown/types";
-import { formatDate, initials } from "@rentbrown/utils";
+import { formatDate, formatMoney, initials } from "@rentbrown/utils";
 
 import { labelFor, toneFor } from "../../lib/status";
+
+/** Server-provided split: signup reward + accumulated deposit rewards. */
+function rewardSplit(referral: ReferralRecord): string {
+  if (referral.rewardAmount === 0) return "no reward";
+  const signup = `${formatMoney(referral.signupReward, referral.currency)} signup`;
+  if (referral.depositRewards > 0) {
+    return `${signup} + ${formatMoney(referral.depositRewards, referral.currency)} deposit`;
+  }
+  return `${signup} on qualification`;
+}
 
 export function ReferralRow({ referral }: { referral: ReferralRecord }) {
   return (
@@ -21,7 +31,7 @@ export function ReferralRow({ referral }: { referral: ReferralRecord }) {
       </div>
       <div className="shrink-0 text-right">
         <MoneyFigure amount={referral.rewardAmount} currency={referral.currency} size="xs" />
-        <p className="text-[10px] text-tertiary">reward</p>
+        <p className="text-[10px] text-tertiary">{rewardSplit(referral)}</p>
       </div>
     </div>
   );

@@ -9,6 +9,7 @@ import { PageHeader } from "../../../components/layout/page-header";
 import { PageSkeleton } from "../../../components/layout/page-skeleton";
 import { Section } from "../../../components/layout/section";
 import { ReferralCodeCard } from "../../../components/referrals/referral-code-card";
+import { ReferralPolicyCard } from "../../../components/referrals/referral-policy-card";
 import { ReferralRow } from "../../../components/referrals/referral-row";
 
 export default function ReferralsPage() {
@@ -70,7 +71,10 @@ export default function ReferralsPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[.9fr_1.1fr]">
-        <ReferralCodeCard summary={s} />
+        <div className="flex flex-col gap-6">
+          <ReferralCodeCard summary={s} />
+          <ReferralPolicyCard policy={s.policy} />
+        </div>
 
         <Section title="Recent referrals" actionHref="/referrals/history" actionLabel="View full history">
           {recent.length === 0 ? (

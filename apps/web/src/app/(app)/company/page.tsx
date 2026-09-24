@@ -1,32 +1,18 @@
-"use client";
-
-import { Button, DataRow, StatePanel } from "@rentbrown/ui";
+import type { Metadata } from "next";
+import { DataRow, StatePanel } from "@rentbrown/ui";
 import { Check } from "lucide-react";
+import { createPublicCatalogueSource } from "@rentbrown/mock-data";
 
-import { useContent } from "../../../lib/data/hooks";
 import { PageHeader } from "../../../components/layout/page-header";
-import { PageSkeleton } from "../../../components/layout/page-skeleton";
 
-export default function CompanyPage() {
-  const content = useContent();
+export const metadata: Metadata = {
+  title: "Company",
+  description: "What RentBrown is built to do and the standards every screen is held to. Prototype build — fictional data.",
+  alternates: { canonical: "/company" },
+};
 
-  if (content.isPending) return <PageSkeleton />;
-  if (content.isError || !content.data) {
-    return (
-      <StatePanel
-        tone="error"
-        title="We couldn't load this page"
-        copy={content.error?.message}
-        action={
-          <Button variant="outline" size="sm" onClick={() => content.refetch()}>
-            Retry
-          </Button>
-        }
-      />
-    );
-  }
-
-  const c = content.data.company;
+export default async function CompanyPage() {
+  const { company: c } = await createPublicCatalogueSource().getContent();
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">

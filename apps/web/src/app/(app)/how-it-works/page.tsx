@@ -1,30 +1,18 @@
-"use client";
-
+import type { Metadata } from "next";
 import Link from "next/link";
-import { Button, StatePanel } from "@rentbrown/ui";
+import { Button } from "@rentbrown/ui";
+import { createPublicCatalogueSource } from "@rentbrown/mock-data";
 
-import { useContent } from "../../../lib/data/hooks";
 import { PageHeader } from "../../../components/layout/page-header";
-import { PageSkeleton } from "../../../components/layout/page-skeleton";
 
-export default function HowItWorksPage() {
-  const content = useContent();
+export const metadata: Metadata = {
+  title: "How it works",
+  description: "From discovering a round to seeing principal and profit settle in your wallet — investing on RentBrown, step by step.",
+  alternates: { canonical: "/how-it-works" },
+};
 
-  if (content.isPending) return <PageSkeleton />;
-  if (content.isError || !content.data) {
-    return (
-      <StatePanel
-        tone="error"
-        title="We couldn't load this page"
-        copy={content.error?.message}
-        action={
-          <Button variant="outline" size="sm" onClick={() => content.refetch()}>
-            Retry
-          </Button>
-        }
-      />
-    );
-  }
+export default async function HowItWorksPage() {
+  const content = await createPublicCatalogueSource().getContent();
 
   return (
     <div className="flex flex-col gap-8">
@@ -34,7 +22,7 @@ export default function HowItWorksPage() {
         copy="From discovering a round to seeing principal and profit settle in your wallet."
       />
       <div className="grid gap-4 sm:grid-cols-2">
-        {content.data.howItWorks.map((s) => (
+        {content.howItWorks.map((s) => (
           <div key={s.step} className="financial-card p-5 sm:p-6">
             <p className="eyebrow text-secondary">{s.step}</p>
             <h2 className="mt-2 text-lg font-extrabold text-foreground">{s.title}</h2>

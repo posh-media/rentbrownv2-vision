@@ -9,6 +9,7 @@ import {
 import type {
   InvestmentFilter,
   MinorUnits,
+  Opportunity,
   OpportunityFilter,
   RequestWithdrawalInput,
   SignInInput,
@@ -70,19 +71,20 @@ export function useDashboard() {
   return useQuery({ queryKey: key("dashboard"), queryFn: () => ds.getDashboard() });
 }
 
-export function useOpportunities(filter?: OpportunityFilter) {
+export function useOpportunities(filter?: OpportunityFilter, opts?: { initialData?: Opportunity[] }) {
   const ds = useDataSource();
   const key = useKey();
   return useQuery({
     queryKey: key("opportunities", filter),
     queryFn: () => ds.listOpportunities(filter),
+    initialData: opts?.initialData,
   });
 }
 
-export function useOpportunity(slug: string) {
+export function useOpportunity(slug: string, opts?: { initialData?: Opportunity | null }) {
   const ds = useDataSource();
   const key = useKey();
-  return useQuery({ queryKey: key("opportunity", slug), queryFn: () => ds.getOpportunity(slug) });
+  return useQuery({ queryKey: key("opportunity", slug), queryFn: () => ds.getOpportunity(slug), initialData: opts?.initialData });
 }
 
 export function useInvestmentQuote(roundId: string, slots: number) {

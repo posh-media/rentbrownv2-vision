@@ -1,49 +1,34 @@
-"use client";
-
+import type { Metadata } from "next";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { Button, EmptyState, StatePanel, StatusPill } from "@rentbrown/ui";
+import { notFound } from "next/navigation";
+import { Button, StatePanel, StatusPill } from "@rentbrown/ui";
 import { formatDate } from "@rentbrown/utils";
+import { createPublicCatalogueSource } from "@rentbrown/mock-data";
 
-import { useContent } from "../../../../lib/data/hooks";
 import { PageHeader } from "../../../../components/layout/page-header";
-import { PageSkeleton } from "../../../../components/layout/page-skeleton";
 
-export default function LegalDocPage() {
-  const { doc } = useParams<{ doc: string }>();
-  const content = useContent();
+export async function generateStaticParams() {
+  const content = await createPublicCatalogueSource().getContent();
+  return content.legal.map((d) => ({ doc: d.id }));
+}
 
-  if (content.isPending) return <PageSkeleton />;
+export async function generateMetadata({ params }: { params: Promise<{ doc: string }> }): Promise<Metadata> {
+  const { doc } = await params;
+  const content = await createPublicCatalogueSource().getContent();
+  const document = content.legal.find((d) => d.id === doc);
+  if (!document) return { title: "Document not found" };
+  return {
+    title: document.title,
+    description: document.summary,
+    alternates: { canonical: `/legal/${doc}` },
+  };
+}
 
-  if (content.isError || !content.data) {
-    return (
-      <StatePanel
-        tone="error"
-        title="We couldn't load this document"
-        copy={content.error?.message}
-        action={
-          <Button variant="outline" size="sm" onClick={() => content.refetch()}>
-            Retry
-          </Button>
-        }
-      />
-    );
-  }
-
-  const document = content.data.legal.find((d) => d.id === doc);
-  if (!document) {
-    return (
-      <EmptyState
-        title="Document not found"
-        copy="Available documents: terms, privacy and risk."
-        action={
-          <Button variant="outline" asChild>
-            <Link href="/legal/terms">Terms of service</Link>
-          </Button>
-        }
-      />
-    );
-  }
+export default async function LegalDocPage({ params }: { params: Promise<{ doc: string }> }) {
+  const { doc } = await params;
+  const content = await createPublicCatalogueSource().getContent();
+  const document = content.legal.find((d) => d.id === doc);
+  if (!document) notFound();
 
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_16rem]">
@@ -68,7 +53,7 @@ export default function LegalDocPage() {
           ))}
         </div>
         <nav aria-label="Legal documents" className="mt-10 flex flex-wrap gap-2">
-          {content.data.legal.map((d) => (
+          {content.legal.map((d) => (
             <Button key={d.id} variant={d.id === doc ? "primary" : "outline"} size="sm" asChild>
               <Link href={`/legal/${d.id}`}>{d.title}</Link>
             </Button>
