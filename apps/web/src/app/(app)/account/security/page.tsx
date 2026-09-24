@@ -1,0 +1,174 @@
+"use client";
+
+import * as React from "react";
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  PinInput,
+  StatePanel,
+  StatusPill,
+  Switch,
+  toast,
+} from "@rentbrown/ui";
+import { Monitor, Smartphone } from "lucide-react";
+import { formatDateTime, formatRelativeDays } from "@rentbrown/utils";
+import { MOCK_NOW } from "@rentbrown/mock-data";
+
+import { useProfile } from "../../../../lib/data/hooks";
+import { useRequireSession } from "../../../../lib/session";
+import { PageHeader } from "../../../../components/layout/page-header";
+import { PageSkeleton } from "../../../../components/layout/page-skeleton";
+
+export default function SecurityPage() {
+  const session = useRequireSession();
+  const profile = useProfile();
+  const [pinOpen, setPinOpen] = React.useState(false);
+  const [pwOpen, setPwOpen] = React.useState(false);
+  const [pin1, setPin1] = React.useState("");
+  const [pin2, setPin2] = React.useState("");
+
+  if (session.isPending || profile.isPending) return <PageSkeleton />;
+  if (profile.isError || !profile.data) {
+    return (
+      <StatePanel
+        tone="error"
+        title="We couldn't load security settings"
+        copy={profile.error?.message}
+        action={
+          <Button variant="outline" size="sm" onClick={() => profile.refetch()}>
+            Retry
+          </Button>
+        }
+      />
+    );
+  }
+
+  const p = profile.data;
+  const sec = p.security;
+
+  const platformIcon = (platform: string) =>
+    platform === "Web" ? <Monitor className="size-4" aria-hidden /> : <Smartphone className="size-4" aria-hidden />;
+
+  return (
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+      <PageHeader title="Security & transaction PIN" copy="Protect your account and confirm sensitive actions." />
+
+      <div className="financial-card flex items-center justify-between gap-4 p-5">
+        <div>
+          <h2 className="text-sm font-bold text-foreground">Transaction PIN</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">Confirms investments and withdrawals.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <StatusPill tone={sec.hasTransactionPin ? "success" : "warning"}>
+            {sec.hasTransactionPin ? "Set" : "Not set"}
+          </StatusPill>
+          <Button variant="outline" size="sm" onClick={() => setPinOpen(true)}>
+            {sec.hasTransactionPin ? "Change PIN" : "Set PIN"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="financial-card flex items-center justify-between gap-4 p-5">
+        <div>
+          <h2 className="text-sm font-bold text-foreground">Password</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {sec.lastPasswordChangeAt ? `Last changed ${formatRelativeDays(sec.lastPasswordChangeAt, MOCK_NOW)}` : "Never changed"}
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setPwOpen(true)}>
+          Change password
+        </Button>
+      </div>
+
+      <div className="financial-card flex items-center justify-between gap-4 p-5">
+        <div>
+          <h2 className="text-sm font-bold text-foreground">Two-factor authentication</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">Extra verification at sign-in.</p>
+        </div>
+        <Switch
+          checked={sec.twoFactorEnabled}
+          onCheckedChange={() => toast.info("Coming in a later phase")}
+          aria-label="Two-factor authentication"
+        />
+      </div>
+
+      <div className="financial-card p-5">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-bold text-foreground">Devices & sessions</h2>
+          <Button variant="outline" size="sm" onClick={() => toast.success("Signed out of other devices (prototype)")}>
+            Sign out of all other devices
+          </Button>
+        </div>
+        <div className="mt-3 divide-y divide-border">
+          {sec.devices.map((d) => (
+            <div key={d.id} className="flex items-center gap-3 py-3">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary-soft text-primary">
+                {platformIcon(d.platform)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-2 text-sm font-bold text-foreground">
+                  {d.label}
+                  {d.current ? <StatusPill tone="info">This device</StatusPill> : null}
+                </p>
+                <p className="text-[11px] text-tertiary">
+                  {d.location} · {d.current ? "Active now" : `Last active ${formatDateTime(d.lastActiveAt)}`}
+                </p>
+              </div>
+              {!d.current ? (
+                <Button variant="ghost" size="sm" onClick={() => toast.success("Signed out (prototype)")}>
+                  Sign out
+                </Button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <Dialog open={pinOpen} onOpenChange={setPinOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{sec.hasTransactionPin ? "Change transaction PIN" : "Set transaction PIN"}</DialogTitle>
+            <DialogDescription>Enter a 6-digit PIN, then confirm it.</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-4">
+            <PinInput value={pin1} onChange={setPin1} label="New PIN" />
+            <PinInput value={pin2} onChange={setPin2} label="Confirm PIN" />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPinOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={pin1.length !== 6 || pin1 !== pin2}
+              onClick={() => {
+                setPinOpen(false);
+                setPin1("");
+                setPin2("");
+                toast.success("Transaction PIN updated (prototype)");
+              }}
+            >
+              Save PIN
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={pwOpen} onOpenChange={setPwOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change password</DialogTitle>
+            <DialogDescription>Password changes arrive with the backend phase.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setPwOpen(false)}>Got it</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
