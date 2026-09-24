@@ -1,3 +1,52 @@
 @import "tailwindcss";
 @import "@rentbrown/design-tokens/css";
 @source "../../../../packages/ui/src";
+
+/* ── Marketing-site extras ────────────────────────────────────────────────── */
+
+/* Subtle editorial grain: warm radial wash + hairline grid, decorative only. */
+@utility hero-wash {
+  background:
+    radial-gradient(52rem 30rem at 85% -10%, var(--secondary-soft), transparent 60%),
+    radial-gradient(40rem 26rem at -10% 110%, var(--accent), transparent 55%);
+}
+
+@utility hairline-grid {
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px);
+  background-size: 3.5rem 3.5rem;
+}
+
+/* Deep brown band — inverse tokens exist as CSS vars, not theme colours. */
+@utility band-inverse {
+  background: var(--inverse-strong);
+  color: var(--primary-foreground);
+}
+
+/* Entrance animation — only when the user has not asked for reduced motion. */
+@keyframes rb-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .reveal {
+    animation: rb-rise 0.7s cubic-bezier(0.22, 0.7, 0.25, 1) both;
+  }
+  .reveal-1 {
+    animation-delay: 0.08s;
+  }
+  .reveal-2 {
+    animation-delay: 0.16s;
+  }
+  .reveal-3 {
+    animation-delay: 0.26s;
+  }
+}
