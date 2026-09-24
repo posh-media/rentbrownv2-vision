@@ -1,0 +1,729 @@
+/**
+ * @rentbrown/types — shared, platform-neutral view-model contracts.
+ *
+ * These describe what the UI RENDERS. They are read projections that a
+ * trusted backend (Firebase in a later phase) will produce. The client never
+ * derives authoritative balances, capacity, profit, eligibility or status from
+ * these shapes — it only displays them and collects intent.
+ *
+ * Money is ALWAYS integer minor units (kobo / cents). Never floats.
+ * Rates are ALWAYS integer basis points (1650 = 16.50%).
+ * Timestamps are ALWAYS ISO-8601 UTC strings; clients localise for display.
+ */
+
+// ── Primitives ───────────────────────────────────────────────────────────────
+
+export type CurrencyCode = "NGN" | "USD";
+/** Integer minor units (kobo/cents). Safe-integer range is ample for display. */
+export type MinorUnits = number;
+/** Integer basis points: 1650 = 16.50 %. */
+export type BasisPoints = number;
+export type ISODateString = string;
+
+export interface Money {
+  currency: CurrencyCode;
+  minor: MinorUnits;
+}
+
+export type DurationUnit = "HOURS" | "DAYS" | "WEEKS" | "MONTHS" | "YEARS";
+export interface Duration {
+  value: number;
+  unit: DurationUnit;
+}
+
+/** Locked status vocabulary → six visual tones (see design-tokens StatusTone). */
+export type StatusTone = "success" | "warning" | "error" | "info" | "pending" | "neutral";
+
+// ── Property → Plan → Round (the opportunity hierarchy) ──────────────────────
+
+export type ProofDocumentType =
+  | "TITLE"
+  | "VALUATION"
+  | "INSPECTION"
+  | "COST_SCHEDULE"
+  | "INSURANCE"
+  | "LEGAL_OPINION"
+  | "OPERATOR_AGREEMENT";
+
+export type ProofDocumentStatus = "VERIFIED" | "PENDING_REVIEW" | "EXPIRED";
+
+export interface ProofDocument {
+  id: string;
+  type: ProofDocumentType;
+  title: string;
+  summary: string;
+  reviewedBy: string;
+  reviewedAt: ISODateString;
+  version: string;
+  status: ProofDocumentStatus;
+}
+
+export interface PropertyUpdate {
+  id: string;
+  title: string;
+  body: string;
+  publishedAt: ISODateString;
+}
+
+export interface PropertyLocation {
+  area: string;
+  city: string;
+  state: string;
+  /** Short public label, e.g. "Ikoyi, Lagos". Exact addresses are never public. */
+  label: string;
+}
+
+export interface Property {
+  id: string;
+  slug: string;
+  name: string;
+  type: string;
+  location: PropertyLocation;
+  summary: string;
+  description: string;
+  /** Asset keys (e.g. "ikoyi-residences"); each platform resolves to a URL/require. */
+  images: string[];
+  operator: { name: string; description: string };
+  highlights: string[];
+  revenueModel: string;
+  proofDocuments: ProofDocument[];
+  updates: PropertyUpdate[];
+}
+
+export type InvestmentPlanStatus = "PUBLISHED" | "PAUSED" | "ARCHIVED";
+
+export interface InvestmentPlan {
+  id: string;
+  propertyId: string;
+  /** e.g. "Residential income note". Terminology stays neutral (no equity/ownership). */
+  name: string;
+  currency: CurrencyCode;
+  slotPrice: MinorUnits;
+  roiBps: BasisPoints;
+  duration: Duration;
+  minSlots: number;
+  maxSlotsPerUser: number | null;
+  /** Fees expressed in bps; 0 at launch. Policy-driven, never hardcoded in UI. */
+  investmentFeeBps: BasisPoints;
+  terms: string[];
+  riskDisclosures: string[];
+  status: InvestmentPlanStatus;
+}
+
+export type InvestmentRoundStatus =
+  | "SCHEDULED"
+  | "OPEN"
+  | "NEARING_CAPACITY"
+  | "SOLD_OUT"
+  | "CLOSED"
+  | "SETTLED";
+
+export interface InvestmentRound {
+  id: string;
+  planId: string;
+  roundNumber: number;
+  status: InvestmentRoundStatus;
+  totalSlots: number;
+  /** Server-provided projections. UI never computes availability itself. */
+  allocatedSlots: number;
+  reservedSlots: number;
+  availableSlots: number;
+  allocatedPct: number;
+  opensAt: ISODateString;
+  closesAt: ISODateString;
+  /** Indicative dates shown on cards; actual dates are set at activation. */
+  projectedStartAt: ISODateString;
+  projectedMaturityAt: ISODateString;
+}
+
+/** Composite read model powering opportunity cards and detail pages. */
+export interface Opportunity {
+  property: Property;
+  plan: InvestmentPlan;
+  round: InvestmentRound;
+  /** Server-computed illustration for ONE slot: keeps principal/profit/maturity distinct. */
+  perSlot: { principal: MinorUnits; expectedProfit: MinorUnits; maturityValue: MinorUnits };
+}
+
+export interface OpportunityFilter {
+  status?: InvestmentRoundStatus[] | "ALL";
+  query?: string;
+  sort?: "NEWEST" | "CLOSING_SOON" | "ROI" | "SLOT_PRICE";
+}
+
+// ── Checkout ─────────────────────────────────────────────────────────────────
+
+export type FundingSource = "WALLET" | "BANK_TRANSFER" | "CARD";
+
+/** A quote is requested from the data source; the UI never multiplies money. */
+export interface InvestmentQuote {
+  roundId: string;
+  slots: number;
+  slotPrice: MinorUnits;
+  principal: MinorUnits;
+  roiBps: BasisPoints;
+  expectedProfit: MinorUnits;
+  maturityValue: MinorUnits;
+  fees: MinorUnits;
+  currency: CurrencyCode;
+  duration: Duration;
+  projectedStartAt: ISODateString;
+  projectedMaturityAt: ISODateString;
+  minSlots: number;
+  maxSlots: number;
+  availableSlots: number;
+  /** Server-side eligibility, e.g. wallet funding needs sufficient AVAILABLE balance. */
+  fundingOptions: Array<{
+    source: FundingSource;
+    available: boolean;
+    reason?: string;
+    walletAvailable?: MinorUnits;
+  }>;
+  quotedAt: ISODateString;
+  expiresAt: ISODateString;
+}
+
+export type PaymentStatus = "PENDING" | "CONFIRMING" | "SUCCESSFUL" | "FAILED" | "REFUNDED";
+
+export interface InvestmentSubmission {
+  reference: string;
+  investmentId: string | null;
+  paymentStatus: PaymentStatus;
+  fundingSource: FundingSource;
+  amount: MinorUnits;
+  currency: CurrencyCode;
+  submittedAt: ISODateString;
+  /** Present for bank transfers: where the user should send funds. */
+  transferInstructions?: VirtualAccount;
+  failureReason?: string;
+}
+
+// ── Investments (user positions) ─────────────────────────────────────────────
+
+export type InvestmentStatus =
+  | "PAYMENT_PENDING"
+  | "ACTIVE"
+  | "MATURITY_DUE"
+  | "SETTLING"
+  | "COMPLETED"
+  | "FAILED"
+  | "REFUNDED"
+  | "REVIEW_REQUIRED";
+
+export interface InvestmentTimelineEvent {
+  id: string;
+  label: string;
+  at: ISODateString | null;
+  state: "done" | "current" | "upcoming";
+  reference?: string;
+}
+
+export interface Investment {
+  id: string;
+  reference: string;
+  roundId: string;
+  propertySlug: string;
+  propertyName: string;
+  propertyImage: string;
+  locationLabel: string;
+  planName: string;
+  status: InvestmentStatus;
+  currency: CurrencyCode;
+  slots: number;
+  slotPrice: MinorUnits;
+  /** Immutable economic snapshot taken at activation. */
+  principal: MinorUnits;
+  roiBps: BasisPoints;
+  expectedProfit: MinorUnits;
+  maturityValue: MinorUnits;
+  duration: Duration;
+  fundingSource: FundingSource;
+  activatedAt: ISODateString | null;
+  maturesAt: ISODateString | null;
+  completedAt: ISODateString | null;
+  /** Server projections for progress UI. */
+  termProgressPct: number;
+  daysRemaining: number | null;
+  settlement?: {
+    principalReference: string;
+    profitReference: string;
+    creditedTo: WalletAccountType;
+    creditedAt: ISODateString;
+  };
+  timeline: InvestmentTimelineEvent[];
+}
+
+export interface InvestmentFilter {
+  status?: "ACTIVE" | "MATURED" | "ALL";
+}
+
+// ── Wallet ───────────────────────────────────────────────────────────────────
+
+/**
+ * AVAILABLE — usable to invest or withdraw.
+ * RESERVED  — committed to an in-flight operation (e.g. withdrawal under review).
+ * BONUS     — qualified referral/reward funds.
+ * PENDING   — incoming funds awaiting confirmation (deposit confirming, settlement).
+ */
+export type WalletAccountType = "AVAILABLE" | "RESERVED" | "BONUS" | "PENDING";
+
+export interface PayoutMethod {
+  id: string;
+  bankName: string;
+  bankCode: string;
+  accountNumberMasked: string;
+  accountName: string;
+  isDefault: boolean;
+  verified: boolean;
+  addedAt: ISODateString;
+}
+
+export interface WalletSummary {
+  currency: CurrencyCode;
+  balances: Record<WalletAccountType, MinorUnits>;
+  /** Available + Reserved + Bonus + Pending; server-provided for the hero figure. */
+  total: MinorUnits;
+  updatedAt: ISODateString;
+  payoutMethods: PayoutMethod[];
+  policies: WalletPolicies;
+}
+
+/** Fee/limit policy is versioned server configuration surfaced for display. */
+export interface WalletPolicies {
+  withdrawalFeeBps: BasisPoints;
+  withdrawalFeeCap: MinorUnits;
+  minWithdrawal: MinorUnits;
+  minDeposit: MinorUnits;
+  depositFeeBps: BasisPoints;
+  kycRequiredForWithdrawal: boolean;
+  version: string;
+}
+
+export type TransactionType =
+  | "DEPOSIT"
+  | "INVESTMENT"
+  | "MATURITY_PRINCIPAL"
+  | "MATURITY_PROFIT"
+  | "WITHDRAWAL"
+  | "WITHDRAWAL_FEE"
+  | "WITHDRAWAL_RELEASE"
+  | "REFERRAL_REWARD"
+  | "BONUS_TRANSFER"
+  | "REFUND"
+  | "REVERSAL";
+
+export type TransactionStatus = "PENDING" | "SUCCESSFUL" | "FAILED" | "REVERSED" | "UNDER_REVIEW";
+
+export interface Transaction {
+  id: string;
+  reference: string;
+  type: TransactionType;
+  status: TransactionStatus;
+  direction: "CREDIT" | "DEBIT";
+  amount: MinorUnits;
+  currency: CurrencyCode;
+  account: WalletAccountType;
+  title: string;
+  description: string;
+  occurredAt: ISODateString;
+  providerReference?: string;
+  related?: { kind: "investment" | "deposit" | "withdrawal" | "referral"; id: string };
+  balanceAfter?: MinorUnits;
+}
+
+export interface TransactionFilter {
+  type?: TransactionType[] | "ALL";
+  status?: TransactionStatus[] | "ALL";
+  query?: string;
+}
+
+// ── Deposits ─────────────────────────────────────────────────────────────────
+
+export type DepositMethod = "BANK_TRANSFER" | "CARD";
+export type DepositStatus = "AWAITING_TRANSFER" | "CONFIRMING" | "CREDITED" | "FAILED" | "EXPIRED";
+
+export interface VirtualAccount {
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  reference: string;
+  expiresAt: ISODateString;
+}
+
+export interface DepositIntent {
+  id: string;
+  reference: string;
+  amount: MinorUnits;
+  currency: CurrencyCode;
+  method: DepositMethod;
+  status: DepositStatus;
+  fee: MinorUnits;
+  createdAt: ISODateString;
+  creditedAt: ISODateString | null;
+  transferInstructions?: VirtualAccount;
+}
+
+// ── Withdrawals ──────────────────────────────────────────────────────────────
+
+export type WithdrawalStatus =
+  | "REQUESTED"
+  | "UNDER_REVIEW"
+  | "APPROVED"
+  | "PROCESSING"
+  | "COMPLETED"
+  | "REJECTED"
+  | "FAILED";
+
+export interface WithdrawalQuote {
+  amount: MinorUnits;
+  fee: MinorUnits;
+  netAmount: MinorUnits;
+  currency: CurrencyCode;
+  feeDescription: string;
+  minAmount: MinorUnits;
+  maxAmount: MinorUnits;
+  eligible: boolean;
+  /** Present when not eligible: insufficient balance, below minimum, KYC required, no PIN… */
+  blockedReason?: string;
+  estimatedArrival: string;
+}
+
+export interface Withdrawal {
+  id: string;
+  reference: string;
+  amount: MinorUnits;
+  fee: MinorUnits;
+  netAmount: MinorUnits;
+  currency: CurrencyCode;
+  destination: PayoutMethod;
+  status: WithdrawalStatus;
+  requestedAt: ISODateString;
+  completedAt: ISODateString | null;
+  rejectionReason?: string;
+  timeline: Array<{ status: WithdrawalStatus; at: ISODateString | null; note?: string }>;
+}
+
+// ── Referrals & rewards ──────────────────────────────────────────────────────
+
+export type ReferralStatus = "JOINED" | "PENDING" | "QUALIFIED" | "CREDITED" | "DISQUALIFIED";
+
+export interface ReferralSummary {
+  code: string;
+  shareUrl: string;
+  referredCount: number;
+  pendingRewards: MinorUnits;
+  qualifiedRewards: MinorUnits;
+  earnedRewards: MinorUnits;
+  currency: CurrencyCode;
+  /** Plain-language rules, versioned server content. */
+  rules: string[];
+  qualificationSteps: string[];
+}
+
+export interface ReferralRecord {
+  id: string;
+  /** Masked for privacy, e.g. "Chidi E." */
+  displayName: string;
+  joinedAt: ISODateString;
+  status: ReferralStatus;
+  rewardAmount: MinorUnits;
+  currency: CurrencyCode;
+  statusNote: string;
+  qualifiedAt: ISODateString | null;
+  creditedAt: ISODateString | null;
+}
+
+// ── KYC (UI-only foundation; no provider) ────────────────────────────────────
+
+export type KycStatus = "NOT_STARTED" | "IN_PROGRESS" | "PENDING_REVIEW" | "VERIFIED" | "REJECTED";
+
+export interface KycStep {
+  id: "PERSONAL" | "IDENTITY" | "ADDRESS" | "SELFIE";
+  title: string;
+  description: string;
+  state: "complete" | "current" | "upcoming" | "action_required";
+}
+
+export interface KycSummary {
+  status: KycStatus;
+  tier: number;
+  steps: KycStep[];
+  submittedAt: ISODateString | null;
+  reviewedAt: ISODateString | null;
+  rejectionReason?: string;
+  unlocks: string[];
+}
+
+// ── Notifications ────────────────────────────────────────────────────────────
+
+export type NotificationCategory =
+  | "INVESTMENTS"
+  | "MONEY"
+  | "KYC"
+  | "REFERRALS"
+  | "SECURITY"
+  | "ANNOUNCEMENTS";
+
+export type NotificationLink =
+  | { kind: "investment"; id: string }
+  | { kind: "withdrawal"; id: string }
+  | { kind: "wallet" }
+  | { kind: "opportunity"; slug: string }
+  | { kind: "referrals" }
+  | { kind: "kyc" }
+  | { kind: "security" };
+
+export interface Notification {
+  id: string;
+  category: NotificationCategory;
+  title: string;
+  body: string;
+  createdAt: ISODateString;
+  read: boolean;
+  link?: NotificationLink;
+}
+
+// ── Account / profile / security ─────────────────────────────────────────────
+
+export type AccountStatus = "ACTIVE" | "RESTRICTED" | "SUSPENDED";
+
+export interface SessionDevice {
+  id: string;
+  label: string;
+  platform: "iOS" | "Android" | "Web";
+  location: string;
+  lastActiveAt: ISODateString;
+  current: boolean;
+}
+
+export interface NotificationPreference {
+  push: boolean;
+  email: boolean;
+}
+
+export interface UserProfile {
+  id: string;
+  firstName: string;
+  lastName: string;
+  displayName: string;
+  initials: string;
+  email: string;
+  phone: string;
+  avatarUrl: string | null;
+  memberSince: ISODateString;
+  accountStatus: AccountStatus;
+  emailVerified: boolean;
+  security: {
+    hasTransactionPin: boolean;
+    biometricsEnabled: boolean;
+    twoFactorEnabled: boolean;
+    lastPasswordChangeAt: ISODateString | null;
+    devices: SessionDevice[];
+  };
+  preferences: {
+    displayCurrency: CurrencyCode;
+    notifications: Record<NotificationCategory, NotificationPreference>;
+  };
+}
+
+export interface Session {
+  userId: string;
+  displayName: string;
+  /** Mock only. Real sessions arrive from Firebase Auth in a later phase. */
+  issuedAt: ISODateString;
+}
+
+// ── Dashboard projection ─────────────────────────────────────────────────────
+
+export type PendingActionKind =
+  | "VERIFY_EMAIL"
+  | "COMPLETE_KYC"
+  | "KYC_ACTION_REQUIRED"
+  | "KYC_PENDING"
+  | "SET_TRANSACTION_PIN"
+  | "WITHDRAWAL_REJECTED"
+  | "WITHDRAWAL_UNDER_REVIEW"
+  | "DEPOSIT_CONFIRMING"
+  | "PAYMENT_PENDING"
+  | "REFERRAL_REWARD_PENDING"
+  | "MATURITY_SOON";
+
+export interface PendingAction {
+  id: string;
+  kind: PendingActionKind;
+  title: string;
+  body: string;
+  tone: StatusTone;
+  link?: NotificationLink;
+}
+
+export interface DashboardSummary {
+  greetingName: string;
+  asOf: ISODateString;
+  currency: CurrencyCode;
+  /** Active principal + all wallet balances. NOT a promise of future value. */
+  totalPortfolioValue: MinorUnits;
+  activePrincipal: MinorUnits;
+  activeInvestmentCount: number;
+  /** Sum of expected profit across active positions — clearly labelled "expected". */
+  expectedProfitActive: MinorUnits;
+  projectedMaturityValueActive: MinorUnits;
+  /** Realised profit already credited by completed settlements. */
+  realisedProfitLifetime: MinorUnits;
+  wallet: { available: MinorUnits; reserved: MinorUnits; bonus: MinorUnits; pending: MinorUnits };
+  nextMaturity: {
+    investmentId: string;
+    propertyName: string;
+    maturesAt: ISODateString;
+    maturityValue: MinorUnits;
+    daysRemaining: number;
+  } | null;
+  unreadNotifications: number;
+  referral: { earned: MinorUnits; pending: MinorUnits };
+  kycStatus: KycStatus;
+  pendingActions: PendingAction[];
+  featuredOpportunitySlugs: string[];
+  openOpportunityCount: number;
+}
+
+// ── Static content (shared by site, web, mobile) ─────────────────────────────
+
+export interface FaqItem {
+  id: string;
+  question: string;
+  answer: string;
+  category: "BASICS" | "INVESTING" | "WALLET" | "SECURITY" | "REFERRALS";
+}
+
+export interface HowItWorksStep {
+  step: string;
+  title: string;
+  body: string;
+}
+
+export interface LegalDocument {
+  id: "terms" | "privacy" | "risk";
+  title: string;
+  version: string;
+  effectiveAt: ISODateString;
+  summary: string;
+  sections: Array<{ heading: string; body: string }>;
+}
+
+export interface HelpArticle {
+  id: string;
+  title: string;
+  summary: string;
+  category: "GETTING_STARTED" | "INVESTING" | "WALLET" | "SECURITY" | "REFERRALS";
+  readMinutes: number;
+}
+
+export interface CompanyInfo {
+  name: string;
+  tagline: string;
+  purpose: string;
+  standards: string[];
+  /** Always shown: fixtures are fictional; never imply real registrations. */
+  prototypeNotice: string;
+  contact: { email: string; phone: string; address: string };
+}
+
+export interface ContentBundle {
+  faqs: FaqItem[];
+  howItWorks: HowItWorksStep[];
+  legal: LegalDocument[];
+  help: HelpArticle[];
+  company: CompanyInfo;
+  trustPillars: Array<{ title: string; body: string }>;
+}
+
+// ── Data source contract (the future Firebase seam) ──────────────────────────
+
+export interface SignInInput {
+  email: string;
+  password: string;
+}
+
+export interface SignUpInput {
+  fullName: string;
+  email: string;
+  phone: string;
+  password: string;
+  referralCode?: string;
+}
+
+export interface SubmitInvestmentInput {
+  roundId: string;
+  slots: number;
+  fundingSource: FundingSource;
+  /** Client-generated; the server dedupes retries by it. */
+  idempotencyKey: string;
+}
+
+export interface CreateDepositInput {
+  amount: MinorUnits;
+  method: DepositMethod;
+  idempotencyKey: string;
+}
+
+export interface RequestWithdrawalInput {
+  amount: MinorUnits;
+  destinationId: string;
+  idempotencyKey: string;
+}
+
+/**
+ * Everything the investor apps read or ask for. Implemented today by
+ * `@rentbrown/mock-data`; later by a Firebase-backed adapter. Screens depend
+ * on THIS interface, never on a concrete implementation.
+ */
+export interface InvestorDataSource {
+  // session
+  getSession(): Promise<Session | null>;
+  signIn(input: SignInInput): Promise<Session>;
+  signUp(input: SignUpInput): Promise<Session>;
+  signOut(): Promise<void>;
+
+  // profile & account
+  getProfile(): Promise<UserProfile>;
+  getKyc(): Promise<KycSummary>;
+
+  // home
+  getDashboard(): Promise<DashboardSummary>;
+
+  // opportunities
+  listOpportunities(filter?: OpportunityFilter): Promise<Opportunity[]>;
+  getOpportunity(slug: string): Promise<Opportunity | null>;
+
+  // checkout
+  quoteInvestment(roundId: string, slots: number): Promise<InvestmentQuote>;
+  submitInvestment(input: SubmitInvestmentInput): Promise<InvestmentSubmission>;
+  getSubmission(reference: string): Promise<InvestmentSubmission | null>;
+
+  // portfolio
+  listInvestments(filter?: InvestmentFilter): Promise<Investment[]>;
+  getInvestment(id: string): Promise<Investment | null>;
+
+  // wallet
+  getWallet(): Promise<WalletSummary>;
+  listTransactions(filter?: TransactionFilter): Promise<Transaction[]>;
+  getTransaction(id: string): Promise<Transaction | null>;
+  createDeposit(input: CreateDepositInput): Promise<DepositIntent>;
+  getDeposit(id: string): Promise<DepositIntent | null>;
+  quoteWithdrawal(amount: MinorUnits, destinationId?: string): Promise<WithdrawalQuote>;
+  requestWithdrawal(input: RequestWithdrawalInput): Promise<Withdrawal>;
+  getWithdrawal(id: string): Promise<Withdrawal | null>;
+  listWithdrawals(): Promise<Withdrawal[]>;
+
+  // referrals
+  getReferralSummary(): Promise<ReferralSummary>;
+  listReferrals(): Promise<ReferralRecord[]>;
+
+  // notifications
+  listNotifications(): Promise<Notification[]>;
+  markNotificationRead(id: string): Promise<void>;
+  markAllNotificationsRead(): Promise<void>;
+
+  // content
+  getContent(): Promise<ContentBundle>;
+}

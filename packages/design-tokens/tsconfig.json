@@ -1,0 +1,4 @@
+{
+  "extends": "@rentbrown/config/tsconfig/library.json",
+  "include": ["src", "scripts"]
+}

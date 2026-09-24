@@ -1,0 +1,236 @@
+/* generated from tokens.ts — keep in sync (checked by scripts/check-css-sync.mjs) */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-tertiary: var(--tertiary);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-secondary-soft: var(--secondary-soft);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
+  --color-success-border: var(--success-border);
+  --color-success-dot: var(--success);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-border: var(--warning-border);
+  --color-warning-dot: var(--warning-dot);
+  --color-error: var(--error);
+  --color-error-soft: var(--error-soft);
+  --color-error-border: var(--error-border);
+  --color-error-dot: var(--error-dot);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-border: var(--info-border);
+  --color-info-dot: var(--info-dot);
+  --color-pending: var(--pending);
+  --color-pending-soft: var(--pending-soft);
+  --color-pending-border: var(--pending-border);
+  --color-pending-dot: var(--pending-dot);
+  --color-neutral-soft: var(--neutral-soft);
+  --color-neutral-fg: var(--neutral-fg);
+  --color-neutral-border: var(--neutral-border);
+  --color-neutral-dot: var(--neutral-dot);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-grid: var(--chart-grid);
+  --color-gold: var(--gold);
+  --color-gold-soft: var(--gold-soft);
+  --color-glass: var(--glass);
+  --color-glass-strong: var(--glass-strong);
+  --color-glass-soft: var(--glass-soft);
+  --color-glass-border: var(--glass-border);
+  --color-glass-border-strong: var(--glass-border-strong);
+  --color-glass-dark: var(--glass-dark);
+  --color-glass-dark-strong: var(--glass-dark-strong);
+  --color-glass-dark-border: var(--glass-dark-border);
+
+  --font-sans: var(--font-plus-jakarta, "Plus Jakarta Sans"), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-dm-serif, "DM Serif Display"), Georgia, serif;
+
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  --shadow-xs: 0 1px 2px rgba(62, 42, 35, 0.06);
+  --shadow-sm: 0 2px 8px rgba(62, 42, 35, 0.08);
+  --shadow-md: 0 8px 24px rgba(62, 42, 35, 0.1);
+  --shadow-lg: 0 16px 48px rgba(62, 42, 35, 0.16);
+  --shadow-glass: 0 8px 32px rgba(62, 42, 35, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+:root {
+  /* generated from tokens.ts — keep in sync */
+  --background: #fffdf8;
+  --foreground: #2d2624;
+  --card: #ffffff;
+  --card-foreground: #2d2624;
+  --surface-subtle: #f7f1ea;
+  --surface-sunken: #f1e9e0;
+  --inverse: #5d4037;
+  --inverse-strong: #3e2a23;
+  --primary: #5d4037;
+  --primary-foreground: #fffdf8;
+  --primary-hover: #4a332b;
+  --primary-active: #3e2a23;
+  --secondary: #8d6e63;
+  --secondary-foreground: #fffdf8;
+  --secondary-soft: #efe4dc;
+  --secondary-hover: #dcc8bd;
+  --muted: #f7f1ea;
+  --muted-foreground: #6b5d55;
+  --tertiary: #9a8a7f;
+  --brand-soft: #8d6e63;
+  --accent: #efe4dc;
+  --accent-foreground: #5d4037;
+  --border: #e8ddd4;
+  --border-strong: #d5c6b9;
+  --border-brand: #c4a99b;
+  --border-inverse: rgba(255, 253, 248, 0.18);
+  --input: #d5c6b9;
+  --ring: #8d6e63;
+  --disabled-bg: #f1e9e0;
+  --disabled-text: #9a8a7f;
+  --destructive: #b3261e;
+  --destructive-foreground: #fffdf8;
+  --success: #388e3c;
+  --success-foreground: #fffdf8;
+  --success-fg: #2e7d32;
+  --success-soft: #e3f1e4;
+  --success-border: #c8e3ca;
+  --warning: #b26a00;
+  --warning-fg: #b26a00;
+  --warning-soft: #fbeedb;
+  --warning-border: #f0d9b3;
+  --warning-dot: #d48a1e;
+  --error: #b3261e;
+  --error-fg: #b3261e;
+  --error-soft: #f9e3e1;
+  --error-border: #efc4c0;
+  --error-dot: #c9463e;
+  --info: #5d4037;
+  --info-fg: #5d4037;
+  --info-soft: #efe4dc;
+  --info-border: #dcc8bd;
+  --info-dot: #8d6e63;
+  --pending: #70524a;
+  --pending-fg: #70524a;
+  --pending-soft: #f7f1ea;
+  --pending-border: #dcc8bd;
+  --pending-dot: #a98b7e;
+  --neutral-fg: #6b5d55;
+  --neutral-soft: #f7f1ea;
+  --neutral-border: #e8ddd4;
+  --neutral-dot: #9a8a7f;
+  --gold: #c9a227;
+  --gold-soft: #f7efd4;
+  --glass: rgba(255, 253, 248, 0.72);
+  --glass-strong: rgba(255, 253, 248, 0.88);
+  --glass-soft: rgba(255, 255, 255, 0.55);
+  --glass-border: rgba(93, 64, 55, 0.12);
+  --glass-border-strong: rgba(93, 64, 55, 0.20);
+  --glass-dark: rgba(45, 38, 36, 0.55);
+  --glass-dark-strong: rgba(45, 38, 36, 0.72);
+  --glass-dark-border: rgba(255, 253, 248, 0.18);
+  --chart-1: #5d4037;
+  --chart-2: #c9a227;
+  --chart-3: #c4a99b;
+  --chart-grid: #e8ddd4;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+}
+
+@utility rb-container {
+  width: min(100% - 2rem, 76rem);
+  margin-inline: auto;
+}
+
+@utility financial-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-card);
+  box-shadow: var(--shadow-xs);
+}
+
+@utility glass {
+  background: var(--color-glass);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid var(--color-glass-border);
+  box-shadow: var(--shadow-glass);
+}
+
+@utility glass-soft {
+  background: var(--color-glass-soft);
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  border: 1px solid var(--color-glass-border);
+  box-shadow: var(--shadow-glass);
+}
+
+@utility glass-strong {
+  background: var(--color-glass-strong);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid var(--color-glass-border);
+  box-shadow: var(--shadow-glass);
+}
+
+@utility glass-dark {
+  background: var(--color-glass-dark);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid var(--color-glass-dark-border);
+  color: var(--color-primary-foreground);
+  box-shadow: var(--shadow-glass);
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+@utility eyebrow {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
