@@ -4,7 +4,7 @@
  *
  * Consistency contract (checked in mock-data tests):
  *   wallet.AVAILABLE = 146,250 · RESERVED = 25,000 (WD under review) ·
- *   BONUS = 15,000 (3 credited referral rewards) · PENDING = 50,000 (deposit confirming)
+ *   BONUS = 15,000 (3 credited referrals: ₦1,500 signup + deposit rewards) · PENDING = 50,000 (deposit confirming)
  *   active principal = 200,000 + 250,000 + 50,000 = 500,000
  */
 import type {
@@ -252,7 +252,8 @@ export const transactions: Transaction[] = [
   { id: "tx_01", reference: "RB-DP-260924-2210", type: "DEPOSIT", status: "PENDING", direction: "CREDIT", amount: naira(50_000), currency: "NGN", account: "PENDING", title: "Wallet deposit", description: "Bank transfer awaiting confirmation", occurredAt: "2026-09-24T08:45:00Z", related: { kind: "deposit", id: "dep_02" } },
   { id: "tx_02", reference: "RB-DP-260920-1842", type: "DEPOSIT", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(250_000), currency: "NGN", account: "AVAILABLE", title: "Wallet deposit", description: "Bank transfer confirmed", occurredAt: "2026-09-20T13:10:00Z", providerReference: "PSV-88214-0920", related: { kind: "deposit", id: "dep_01" }, balanceAfter: naira(346_250) },
   { id: "tx_03", reference: "RB-IV-260918-7201", type: "INVESTMENT", status: "SUCCESSFUL", direction: "DEBIT", amount: naira(200_000), currency: "NGN", account: "AVAILABLE", title: "The Terraces, Ikoyi — 2 slots", description: "Principal allocated to Round 2", occurredAt: "2026-09-18T14:22:00Z", related: { kind: "investment", id: "inv_terraces_2" }, balanceAfter: naira(146_250) },
-  { id: "tx_04", reference: "RB-RF-260915-0821", type: "REFERRAL_REWARD", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(5_000), currency: "NGN", account: "BONUS", title: "Referral reward", description: "Reward for Chidi E. qualified", occurredAt: "2026-09-15T09:00:00Z", related: { kind: "referral", id: "ref_chidi" } },
+  { id: "tx_04b", reference: "RB-RF-260915-0822", type: "REFERRAL_REWARD", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(5_000), currency: "NGN", account: "BONUS", title: "Deposit referral reward", description: "1% deposit referral reward for Chidi E.", occurredAt: "2026-09-15T09:01:00Z", related: { kind: "referral", id: "ref_chidi" } },
+  { id: "tx_04", reference: "RB-RF-260915-0821", type: "REFERRAL_REWARD", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(1_500), currency: "NGN", account: "BONUS", title: "Referral signup reward", description: "Signup reward for Chidi E. qualified", occurredAt: "2026-09-15T09:00:00Z", related: { kind: "referral", id: "ref_chidi" } },
   { id: "tx_05", reference: "RB-WD-260911-4410", type: "WITHDRAWAL", status: "UNDER_REVIEW", direction: "DEBIT", amount: naira(25_000), currency: "NGN", account: "RESERVED", title: "Bank withdrawal", description: "To GTBank •••• 0123 · reserved pending review", occurredAt: "2026-09-11T16:02:00Z", related: { kind: "withdrawal", id: "wd_03" } },
   { id: "tx_06", reference: "RB-MT-260828-1134-P", type: "MATURITY_PROFIT", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(3_750), currency: "NGN", account: "AVAILABLE", title: "Wuse Square — profit", description: "Expected profit settled at maturity", occurredAt: "2026-08-28T10:31:00Z", related: { kind: "investment", id: "inv_wuse_2" } },
   { id: "tx_07", reference: "RB-MT-260828-1134", type: "MATURITY_PRINCIPAL", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(30_000), currency: "NGN", account: "AVAILABLE", title: "Wuse Square — principal returned", description: "Principal returned at maturity", occurredAt: "2026-08-28T10:31:00Z", related: { kind: "investment", id: "inv_wuse_2" } },
@@ -260,9 +261,11 @@ export const transactions: Transaction[] = [
   { id: "tx_09", reference: "RB-WD-260812-3301", type: "WITHDRAWAL", status: "SUCCESSFUL", direction: "DEBIT", amount: naira(50_000), currency: "NGN", account: "AVAILABLE", title: "Bank withdrawal", description: "Paid to GTBank •••• 0123", occurredAt: "2026-08-12T11:20:00Z", providerReference: "NIP-0812-77120", related: { kind: "withdrawal", id: "wd_02" } },
   { id: "tx_10", reference: "RB-MT-260715-0902-P", type: "MATURITY_PROFIT", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(14_000), currency: "NGN", account: "AVAILABLE", title: "Palm Court — profit", description: "Expected profit settled at maturity", occurredAt: "2026-07-15T12:12:00Z", related: { kind: "investment", id: "inv_palm_1" } },
   { id: "tx_11", reference: "RB-MT-260715-0902", type: "MATURITY_PRINCIPAL", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(100_000), currency: "NGN", account: "AVAILABLE", title: "Palm Court — principal returned", description: "Principal returned at maturity", occurredAt: "2026-07-15T12:12:00Z", related: { kind: "investment", id: "inv_palm_1" } },
-  { id: "tx_12", reference: "RB-RF-260702-0410", type: "REFERRAL_REWARD", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(5_000), currency: "NGN", account: "BONUS", title: "Referral reward", description: "Reward for Tolu A. qualified", occurredAt: "2026-07-02T09:00:00Z", related: { kind: "referral", id: "ref_tolu" } },
+  { id: "tx_12b", reference: "RB-RF-260702-0411", type: "REFERRAL_REWARD", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(3_000), currency: "NGN", account: "BONUS", title: "Deposit referral reward", description: "1% deposit referral reward for Tolu A.", occurredAt: "2026-07-02T09:01:00Z", related: { kind: "referral", id: "ref_tolu" } },
+  { id: "tx_12", reference: "RB-RF-260702-0410", type: "REFERRAL_REWARD", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(1_500), currency: "NGN", account: "BONUS", title: "Referral signup reward", description: "Signup reward for Tolu A. qualified", occurredAt: "2026-07-02T09:00:00Z", related: { kind: "referral", id: "ref_tolu" } },
   { id: "tx_13", reference: "RB-IV-260502-4418", type: "INVESTMENT", status: "SUCCESSFUL", direction: "DEBIT", amount: naira(50_000), currency: "NGN", account: "AVAILABLE", title: "Wuse Square Residences — 5 slots", description: "Principal allocated to Round 3", occurredAt: "2026-05-02T09:40:00Z", related: { kind: "investment", id: "inv_wuse_3" } },
-  { id: "tx_14", reference: "RB-RF-260412-0117", type: "REFERRAL_REWARD", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(5_000), currency: "NGN", account: "BONUS", title: "Referral reward", description: "Reward for Ngozi U. qualified", occurredAt: "2026-04-12T09:00:00Z", related: { kind: "referral", id: "ref_ngozi" } },
+  { id: "tx_14b", reference: "RB-RF-260412-0118", type: "REFERRAL_REWARD", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(2_500), currency: "NGN", account: "BONUS", title: "Deposit referral reward", description: "1% deposit referral reward for Ngozi U.", occurredAt: "2026-04-12T09:01:00Z", related: { kind: "referral", id: "ref_ngozi" } },
+  { id: "tx_14", reference: "RB-RF-260412-0117", type: "REFERRAL_REWARD", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(1_500), currency: "NGN", account: "BONUS", title: "Referral signup reward", description: "Signup reward for Ngozi U. qualified", occurredAt: "2026-04-12T09:00:00Z", related: { kind: "referral", id: "ref_ngozi" } },
   { id: "tx_15", reference: "RB-IV-260330-2210", type: "INVESTMENT", status: "SUCCESSFUL", direction: "DEBIT", amount: naira(250_000), currency: "NGN", account: "AVAILABLE", title: "Palm Court, Lekki — 5 slots", description: "Principal allocated to Round 2", occurredAt: "2026-03-30T11:05:00Z", related: { kind: "investment", id: "inv_palm_2" } },
   { id: "tx_16", reference: "RB-DP-260328-0955", type: "DEPOSIT", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(300_000), currency: "NGN", account: "AVAILABLE", title: "Wallet deposit", description: "Bank transfer confirmed", occurredAt: "2026-03-28T09:55:00Z", providerReference: "PSV-61002-0328" },
   { id: "tx_17", reference: "RB-WD-260303-1188-R", type: "WITHDRAWAL_RELEASE", status: "SUCCESSFUL", direction: "CREDIT", amount: naira(20_000), currency: "NGN", account: "AVAILABLE", title: "Withdrawal released", description: "Reserved funds returned after rejection", occurredAt: "2026-03-04T10:02:00Z", related: { kind: "withdrawal", id: "wd_01" } },
@@ -312,28 +315,38 @@ export const referralSummary: ReferralSummary = {
   code: "ADA-4821",
   shareUrl: "https://rentbrown.example/r/ADA-4821",
   referredCount: 8,
-  pendingRewards: naira(10_000),
+  pendingRewards: naira(3_000),
   qualifiedRewards: naira(15_000),
   earnedRewards: naira(15_000),
   currency: "NGN",
+  policy: {
+    version: "2026-09-v1",
+    currency: "NGN",
+    signupReward: naira(1_500),
+    qualifyingDeposit: naira(50_000),
+    depositReferralBps: 100,
+    depositReferralCap: naira(10_000),
+    qualificationRule: "Referred user completes identity verification and makes a first deposit of ₦50,000 or more.",
+  },
   rules: [
-    "You receive ₦5,000 when someone you refer completes identity verification and makes a qualifying first investment of ₦50,000 or more.",
+    "You receive ₦1,500 when someone you refer completes identity verification and makes a qualifying first deposit of ₦50,000 or more.",
+    "You also receive 1% of each qualifying deposit your referred user makes, up to ₦10,000 per referred user.",
     "Rewards are credited to your bonus balance and can be invested or transferred to your available balance.",
-    "Rewards are pending until every condition is met, and may be reversed if the referred investment is refunded.",
+    "Rewards are pending until every condition is met, and may be reversed if the referred deposit is refunded.",
     "Self-referrals and duplicate accounts do not qualify.",
   ],
-  qualificationSteps: ["Signs up with your code", "Completes identity verification", "Makes a first investment of ₦50,000+"],
+  qualificationSteps: ["Signs up with your code", "Completes identity verification", "Makes a first deposit of ₦50,000+"],
 };
 
 export const referrals: ReferralRecord[] = [
-  { id: "ref_chidi", displayName: "Chidi E.", joinedAt: "2026-08-30T10:00:00Z", status: "CREDITED", rewardAmount: naira(5_000), currency: "NGN", statusNote: "Reward credited to bonus balance", qualifiedAt: "2026-09-15T08:30:00Z", creditedAt: "2026-09-15T09:00:00Z" },
-  { id: "ref_mariam", displayName: "Mariam B.", joinedAt: "2026-09-08T10:00:00Z", status: "PENDING", rewardAmount: naira(5_000), currency: "NGN", statusNote: "Verified · awaiting first investment", qualifiedAt: null, creditedAt: null },
-  { id: "ref_seun", displayName: "Seun O.", joinedAt: "2026-09-19T10:00:00Z", status: "PENDING", rewardAmount: naira(5_000), currency: "NGN", statusNote: "Verification in progress", qualifiedAt: null, creditedAt: null },
-  { id: "ref_tolu", displayName: "Tolu A.", joinedAt: "2026-06-11T10:00:00Z", status: "CREDITED", rewardAmount: naira(5_000), currency: "NGN", statusNote: "Reward credited to bonus balance", qualifiedAt: "2026-07-01T12:00:00Z", creditedAt: "2026-07-02T09:00:00Z" },
-  { id: "ref_ngozi", displayName: "Ngozi U.", joinedAt: "2026-03-22T10:00:00Z", status: "CREDITED", rewardAmount: naira(5_000), currency: "NGN", statusNote: "Reward credited to bonus balance", qualifiedAt: "2026-04-11T12:00:00Z", creditedAt: "2026-04-12T09:00:00Z" },
-  { id: "ref_emeka", displayName: "Emeka N.", joinedAt: "2026-09-21T10:00:00Z", status: "JOINED", rewardAmount: naira(5_000), currency: "NGN", statusNote: "Signed up · verification not started", qualifiedAt: null, creditedAt: null },
-  { id: "ref_bisi", displayName: "Bisi F.", joinedAt: "2026-09-22T10:00:00Z", status: "JOINED", rewardAmount: naira(5_000), currency: "NGN", statusNote: "Signed up · verification not started", qualifiedAt: null, creditedAt: null },
-  { id: "ref_dup", displayName: "K. Okafor", joinedAt: "2026-05-05T10:00:00Z", status: "DISQUALIFIED", rewardAmount: 0, currency: "NGN", statusNote: "Did not qualify — duplicate account", qualifiedAt: null, creditedAt: null },
+  { id: "ref_chidi", displayName: "Chidi E.", joinedAt: "2026-08-30T10:00:00Z", status: "CREDITED", signupReward: naira(1_500), depositRewards: naira(5_000), rewardAmount: naira(6_500), currency: "NGN", statusNote: "Rewards credited to bonus balance", qualifiedAt: "2026-09-15T08:30:00Z", creditedAt: "2026-09-15T09:00:00Z" },
+  { id: "ref_mariam", displayName: "Mariam B.", joinedAt: "2026-09-08T10:00:00Z", status: "PENDING", signupReward: naira(1_500), depositRewards: 0, rewardAmount: naira(1_500), currency: "NGN", statusNote: "Verified · awaiting first deposit", qualifiedAt: null, creditedAt: null },
+  { id: "ref_seun", displayName: "Seun O.", joinedAt: "2026-09-19T10:00:00Z", status: "PENDING", signupReward: naira(1_500), depositRewards: 0, rewardAmount: naira(1_500), currency: "NGN", statusNote: "Verification in progress", qualifiedAt: null, creditedAt: null },
+  { id: "ref_tolu", displayName: "Tolu A.", joinedAt: "2026-06-11T10:00:00Z", status: "CREDITED", signupReward: naira(1_500), depositRewards: naira(3_000), rewardAmount: naira(4_500), currency: "NGN", statusNote: "Rewards credited to bonus balance", qualifiedAt: "2026-07-01T12:00:00Z", creditedAt: "2026-07-02T09:00:00Z" },
+  { id: "ref_ngozi", displayName: "Ngozi U.", joinedAt: "2026-03-22T10:00:00Z", status: "CREDITED", signupReward: naira(1_500), depositRewards: naira(2_500), rewardAmount: naira(4_000), currency: "NGN", statusNote: "Rewards credited to bonus balance", qualifiedAt: "2026-04-11T12:00:00Z", creditedAt: "2026-04-12T09:00:00Z" },
+  { id: "ref_emeka", displayName: "Emeka N.", joinedAt: "2026-09-21T10:00:00Z", status: "JOINED", signupReward: naira(1_500), depositRewards: 0, rewardAmount: naira(1_500), currency: "NGN", statusNote: "Signed up · verification not started", qualifiedAt: null, creditedAt: null },
+  { id: "ref_bisi", displayName: "Bisi F.", joinedAt: "2026-09-22T10:00:00Z", status: "JOINED", signupReward: naira(1_500), depositRewards: 0, rewardAmount: naira(1_500), currency: "NGN", statusNote: "Signed up · verification not started", qualifiedAt: null, creditedAt: null },
+  { id: "ref_dup", displayName: "K. Okafor", joinedAt: "2026-05-05T10:00:00Z", status: "DISQUALIFIED", signupReward: 0, depositRewards: 0, rewardAmount: 0, currency: "NGN", statusNote: "Did not qualify — duplicate account", qualifiedAt: null, creditedAt: null },
 ];
 
 export const kycVerified: KycSummary = {
@@ -353,7 +366,7 @@ export const kycVerified: KycSummary = {
 export const notifications: Notification[] = [
   { id: "n_01", category: "MONEY", title: "Deposit received — confirming", body: "We have received your ₦50,000 transfer (RB-DP-260924-2210) and are confirming it with the bank.", createdAt: "2026-09-24T08:47:00Z", read: false, link: { kind: "wallet" } },
   { id: "n_02", category: "INVESTMENTS", title: "Maturity approaching", body: "Wuse Square Residences matures in 39 days. ₦56,250 will be credited to your available balance at settlement.", createdAt: "2026-09-24T07:00:00Z", read: false, link: { kind: "investment", id: "inv_wuse_3" } },
-  { id: "n_03", category: "REFERRALS", title: "Referral reward credited", body: "₦5,000 for Chidi E. has been credited to your bonus balance.", createdAt: "2026-09-15T09:01:00Z", read: true, link: { kind: "referrals" } },
+  { id: "n_03", category: "REFERRALS", title: "Referral signup reward credited", body: "Your ₦1,500 signup reward for Chidi E. has been credited to your bonus balance.", createdAt: "2026-09-15T09:01:00Z", read: true, link: { kind: "referrals" } },
   { id: "n_04", category: "MONEY", title: "Withdrawal under review", body: "Request RB-WD-260911-4410 for ₦25,000 is under review. Funds are reserved until it completes.", createdAt: "2026-09-11T16:03:00Z", read: true, link: { kind: "withdrawal", id: "wd_03" } },
   { id: "n_05", category: "ANNOUNCEMENTS", title: "New opportunity: Harbour View Suites", body: "Round 1 is open — ₦25,000 per slot, 15% over 8 months.", createdAt: "2026-09-10T08:05:00Z", read: true, link: { kind: "opportunity", slug: "harbour-view-suites" } },
   { id: "n_06", category: "SECURITY", title: "New sign-in from Chrome on Windows", body: "If this was not you, review your devices and change your password.", createdAt: "2026-09-09T19:22:00Z", read: true, link: { kind: "security" } },

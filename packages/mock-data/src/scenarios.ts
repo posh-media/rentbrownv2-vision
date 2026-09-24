@@ -30,7 +30,7 @@ export const MOCK_SCENARIOS: Array<{ id: MockScenario; label: string; descriptio
   { id: "new-investor", label: "New investor", description: "Empty portfolio and wallet, no transactions, KYC not started, no PIN, email unverified." },
   { id: "kyc-pending", label: "KYC pending review", description: "Ada with documents submitted and awaiting review; withdrawals blocked." },
   { id: "kyc-rejected", label: "KYC action required", description: "Ada with an unreadable address document; resubmission required." },
-  { id: "no-opportunities", label: "No open opportunities", description: "Every round is sold out, closed or scheduled — Explore shows its empty state." },
+  { id: "no-opportunities", label: "No open opportunities", description: "No rounds are available — Explore shows its empty state." },
   { id: "signed-out", label: "Signed out", description: "No session — lands on public and auth screens." },
 ];
 
@@ -146,7 +146,8 @@ export function buildScenario(scenario: MockScenario): ScenarioState {
     }
     case "no-opportunities": {
       const s = established();
-      s.roundIds = rounds.filter((r) => r.status === "SOLD_OUT" || r.status === "SCHEDULED").map((r) => r.id);
+      // No rounds at all → Explore renders its empty state under every filter.
+      s.roundIds = [];
       return s;
     }
     case "signed-out": {

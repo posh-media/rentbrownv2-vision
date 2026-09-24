@@ -407,6 +407,32 @@ export interface Withdrawal {
 
 export type ReferralStatus = "JOINED" | "PENDING" | "QUALIFIED" | "CREDITED" | "DISQUALIFIED";
 
+/**
+ * Two distinct reward kinds. Never conflate them:
+ *  - SIGNUP: fixed amount when a referred user qualifies (default ₦1,500).
+ *  - DEPOSIT: percentage of the referred user's qualifying deposits, capped.
+ */
+export type ReferralRewardKind = "SIGNUP" | "DEPOSIT";
+
+/**
+ * Versioned, server-owned referral policy. Values are displayed, never
+ * computed on the client. Defaults (Phase 1 decision): signup reward ₦1,500.
+ */
+export interface ReferralPolicy {
+  version: string;
+  currency: CurrencyCode;
+  /** Fixed reward for a qualified signup. Default 150_000 minor (₦1,500). */
+  signupReward: MinorUnits;
+  /** Referred user's first deposit must reach this to qualify the signup reward. */
+  qualifyingDeposit: MinorUnits;
+  /** Share of the referred user's qualifying deposits paid to the referrer. */
+  depositReferralBps: BasisPoints;
+  /** Lifetime cap on deposit-referral rewards per referred user. */
+  depositReferralCap: MinorUnits;
+  /** Human-readable qualification rule (server content). */
+  qualificationRule: string;
+}
+
 export interface ReferralSummary {
   code: string;
   shareUrl: string;
@@ -415,6 +441,7 @@ export interface ReferralSummary {
   qualifiedRewards: MinorUnits;
   earnedRewards: MinorUnits;
   currency: CurrencyCode;
+  policy: ReferralPolicy;
   /** Plain-language rules, versioned server content. */
   rules: string[];
   qualificationSteps: string[];
@@ -426,6 +453,11 @@ export interface ReferralRecord {
   displayName: string;
   joinedAt: ISODateString;
   status: ReferralStatus;
+  /** Fixed signup reward for this referral (policy.signupReward at attribution; 0 until qualified if pending). */
+  signupReward: MinorUnits;
+  /** Accumulated deposit-referral rewards from this referred user, capped by policy. */
+  depositRewards: MinorUnits;
+  /** signupReward + depositRewards — server-computed total. */
   rewardAmount: MinorUnits;
   currency: CurrencyCode;
   statusNote: string;
@@ -727,3 +759,18 @@ export interface InvestorDataSource {
   // content
   getContent(): Promise<ContentBundle>;
 }
+
+/**
+ * Read-only, unauthenticated catalogue for server rendering (marketing site,
+ * public explore/opportunity pages). Safe to call from React Server
+ * Components and build-time generation. Later implemented by a Firebase Admin
+ * SDK / published-catalogue adapter; today by `@rentbrown/mock-data`.
+ */
+export interface PublicCatalogueSource {
+  listOpportunities(filter?: OpportunityFilter): Promise<Opportunity[]>;
+  getOpportunity(slug: string): Promise<Opportunity | null>;
+  listProperties(): Promise<Property[]>;
+  getContent(): Promise<ContentBundle>;
+}
+
+export * from "./admin";

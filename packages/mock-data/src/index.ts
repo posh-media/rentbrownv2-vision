@@ -4,11 +4,15 @@
  * adapter in a later phase; the UI depends only on the interface.
  */
 export { createMockDataSource, MockNetworkError, type MockDataSourceOptions } from "./mock-data-source";
+export { createPublicCatalogueSource } from "./public-catalogue";
+export { createMockAdminDataSource, type MockAdminDataSourceOptions } from "./admin-data-source";
+export * as adminFixtures from "./fixtures/admin";
 export { buildScenario, MOCK_SCENARIOS, type MockScenario, type ScenarioState } from "./scenarios";
 export { MOCK_NOW } from "./fixtures/investor";
 export { plans, properties, rounds } from "./fixtures/catalogue";
 export { content } from "./fixtures/content";
 export * as investorFixtures from "./fixtures/investor";
+export * as siteContent from "./fixtures/site";
 
 /**
  * Property image asset keys used by fixtures. Each platform maps these to a

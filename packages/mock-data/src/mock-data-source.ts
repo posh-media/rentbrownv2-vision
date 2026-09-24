@@ -25,10 +25,11 @@ import type {
   WithdrawalQuote,
 } from "@rentbrown/types";
 import { daysBetween, formatMoney, naira } from "@rentbrown/utils";
-import { plans, properties, rounds } from "./fixtures/catalogue";
+import { properties } from "./fixtures/catalogue";
 import { content } from "./fixtures/content";
 import * as ada from "./fixtures/investor";
 import { MOCK_NOW } from "./fixtures/investor";
+import { opportunityForRound, applyOpportunityFilter } from "./opportunities";
 import { buildScenario, type MockScenario, type ScenarioState } from "./scenarios";
 
 export interface MockDataSourceOptions {
@@ -48,15 +49,6 @@ export class MockNetworkError extends Error {
     this.name = "MockNetworkError";
   }
 }
-
-const opportunityFor = (roundId: string): Opportunity | null => {
-  const round = rounds.find((r) => r.id === roundId);
-  const plan = round && plans.find((p) => p.id === round.planId);
-  const property = plan && properties.find((p) => p.id === plan.propertyId);
-  if (!round || !plan || !property) return null;
-  const expectedProfit = Math.round((plan.slotPrice * plan.roiBps) / 10_000);
-  return { property, plan, round, perSlot: { principal: plan.slotPrice, expectedProfit, maturityValue: plan.slotPrice + expectedProfit } };
-};
 
 let refCounter = 9000;
 const nextRef = (prefix: string, now: string) => {
@@ -89,21 +81,8 @@ export function createMockDataSource(options: MockDataSourceOptions = {}): Inves
 
   const clone = <T>(v: T): T => (typeof structuredClone === "function" ? structuredClone(v) : (JSON.parse(JSON.stringify(v)) as T));
 
-  const listOpps = (filter?: OpportunityFilter): Opportunity[] => {
-    let items = state.roundIds.map(opportunityFor).filter((o): o is Opportunity => o !== null);
-    if (filter?.status && filter.status !== "ALL") items = items.filter((o) => (filter.status as string[]).includes(o.round.status));
-    if (filter?.query) {
-      const q = filter.query.toLowerCase();
-      items = items.filter((o) => `${o.property.name} ${o.property.location.label} ${o.plan.name}`.toLowerCase().includes(q));
-    }
-    switch (filter?.sort) {
-      case "CLOSING_SOON": items.sort((a, b) => a.round.closesAt.localeCompare(b.round.closesAt)); break;
-      case "ROI": items.sort((a, b) => b.plan.roiBps - a.plan.roiBps); break;
-      case "SLOT_PRICE": items.sort((a, b) => a.plan.slotPrice - b.plan.slotPrice); break;
-      default: items.sort((a, b) => b.round.opensAt.localeCompare(a.round.opensAt));
-    }
-    return items;
-  };
+  const listOpps = (filter?: OpportunityFilter): Opportunity[] =>
+    applyOpportunityFilter(state.roundIds.map(opportunityForRound).filter((o): o is Opportunity => o !== null), filter);
 
   const dashboard = (): DashboardSummary => {
     const active = state.investments.filter((i) => i.status === "ACTIVE");
@@ -156,7 +135,7 @@ export function createMockDataSource(options: MockDataSourceOptions = {}): Inves
   };
 
   const quote = (roundId: string, slots: number): InvestmentQuote => {
-    const opp = opportunityFor(roundId);
+    const opp = opportunityForRound(roundId);
     if (!opp) throw new Error("Round not found");
     const { plan, round } = opp;
     const maxSlots = Math.min(round.availableSlots, plan.maxSlotsPerUser ?? Number.MAX_SAFE_INTEGER);
@@ -243,7 +222,7 @@ export function createMockDataSource(options: MockDataSourceOptions = {}): Inves
     getOpportunity: (slug) => respond("getOpportunity", () => {
       const property = properties.find((p) => p.slug === slug);
       if (!property) return null;
-      const opp = state.roundIds.map(opportunityFor).find((o) => o?.property.id === property.id);
+      const opp = state.roundIds.map(opportunityForRound).find((o) => o?.property.id === property.id);
       return opp ? clone(opp) : null;
     }),
 
@@ -252,7 +231,7 @@ export function createMockDataSource(options: MockDataSourceOptions = {}): Inves
       const existing = submissions.get(input.idempotencyKey);
       if (existing) return clone(existing);
       const q = quote(input.roundId, input.slots);
-      const opp = opportunityFor(input.roundId)!;
+      const opp = opportunityForRound(input.roundId)!;
       const reference = nextRef("IV", now);
       let submission: InvestmentSubmission;
       if (input.fundingSource === "WALLET") {
