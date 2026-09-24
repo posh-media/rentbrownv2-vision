@@ -1,8 +1,8 @@
 import * as React from "react";
 import { View } from "react-native";
-import { REFERRAL_STATUS, formatListDate } from "@rentbrown/utils";
+import { REFERRAL_STATUS, formatListDate, formatMoney } from "@rentbrown/utils";
 import { MOCK_NOW } from "@rentbrown/mock-data";
-import type { ReferralStatus } from "@rentbrown/types";
+import type { ReferralRecord, ReferralStatus } from "@rentbrown/types";
 
 import { useReferrals } from "../../../../src/data/hooks";
 import {
@@ -20,6 +20,14 @@ import {
 } from "../../../../src/ui";
 
 const FILTERS = ["ALL", "PENDING", "QUALIFIED", "CREDITED", "DISQUALIFIED"] as const;
+
+/** Server-provided split: signup reward + accumulated deposit rewards. */
+const rewardSplit = (r: ReferralRecord) =>
+  r.rewardAmount === 0
+    ? "no reward"
+    : r.depositRewards > 0
+      ? `${formatMoney(r.signupReward, r.currency)} signup + ${formatMoney(r.depositRewards, r.currency)} deposit`
+      : `${formatMoney(r.signupReward, r.currency)} signup on qualification`;
 
 export default function ReferralHistory() {
   const referrals = useReferrals();
@@ -52,6 +60,7 @@ export default function ReferralHistory() {
                 <View style={{ alignItems: "flex-end", gap: 2 }}>
                   <StatusPill size="xs" tone={st.tone} label={st.label} />
                   <MoneyFigure minor={r.rewardAmount} currency={r.currency} size="xs" />
+                  <Caption tone="muted">{rewardSplit(r)}</Caption>
                 </View>
               </View>
             );

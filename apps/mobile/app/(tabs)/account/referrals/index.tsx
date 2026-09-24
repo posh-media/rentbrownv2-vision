@@ -3,9 +3,10 @@ import { useRouter } from "expo-router";
 import { Copy, Gift, Share2 } from "lucide-react-native";
 import * as React from "react";
 import { Share, View } from "react-native";
-import { REFERRAL_STATUS, formatListDate } from "@rentbrown/utils";
+import { REFERRAL_STATUS, formatBps, formatListDate, formatMoney } from "@rentbrown/utils";
 import { MOCK_NOW } from "@rentbrown/mock-data";
 
+import type { ReferralRecord } from "@rentbrown/types";
 import { useReferrals, useReferralSummary } from "../../../../src/data/hooks";
 import { useSession } from "../../../../src/data/provider";
 import { t } from "../../../../src/theme";
@@ -25,6 +26,14 @@ import {
   StatusPill,
   useToast,
 } from "../../../../src/ui";
+
+/** Server-provided split: signup reward + accumulated deposit rewards. */
+const rewardSplit = (r: ReferralRecord) =>
+  r.rewardAmount === 0
+    ? "no reward"
+    : r.depositRewards > 0
+      ? `${formatMoney(r.signupReward, r.currency)} signup + ${formatMoney(r.depositRewards, r.currency)} deposit`
+      : `${formatMoney(r.signupReward, r.currency)} signup on qualification`;
 
 export default function Referrals() {
   const router = useRouter();
@@ -99,6 +108,30 @@ export default function Referrals() {
           </Card>
 
           <Card style={{ gap: 8 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Caption tone="muted">How rewards work</Caption>
+              <Caption tone="muted">{s.policy.version}</Caption>
+            </View>
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <BodySm tone="muted">Signup reward</BodySm>
+              <BodySm style={{ fontWeight: "700" }}>{formatMoney(s.policy.signupReward, s.policy.currency)}</BodySm>
+            </View>
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <BodySm tone="muted">Qualifying deposit</BodySm>
+              <BodySm style={{ fontWeight: "700" }}>{formatMoney(s.policy.qualifyingDeposit, s.policy.currency)}</BodySm>
+            </View>
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <BodySm tone="muted">Deposit referral</BodySm>
+              <BodySm style={{ fontWeight: "700" }}>{formatBps(s.policy.depositReferralBps)} of deposits</BodySm>
+            </View>
+            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+              <BodySm tone="muted">Deposit cap</BodySm>
+              <BodySm style={{ fontWeight: "700" }}>{formatMoney(s.policy.depositReferralCap, s.policy.currency)} / person</BodySm>
+            </View>
+            <Caption tone="muted">{s.policy.qualificationRule}</Caption>
+          </Card>
+
+          <Card style={{ gap: 8 }}>
             <Caption tone="muted">How rewards qualify</Caption>
             {s.qualificationSteps.map((step, i) => (
               <View key={step} style={{ flexDirection: "row", gap: 10 }}>
@@ -137,6 +170,7 @@ export default function Referrals() {
                   <View style={{ alignItems: "flex-end", gap: 2 }}>
                     <StatusPill size="xs" tone={st.tone} label={st.label} />
                     <MoneyFigure minor={r.rewardAmount} currency={r.currency} size="xs" />
+                    <Caption tone="muted">{rewardSplit(r)}</Caption>
                   </View>
                 </View>
               );
