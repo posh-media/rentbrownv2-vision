@@ -35,7 +35,7 @@ The canonical repository started **empty** apart from the master brief. Nothing 
 | Monorepo | pnpm + Turborepo, `apps/{mobile,web,admin,site,api,worker}`, `packages/{domain,types,validation,config,design-tokens,api-client,providers,database,ui}` | Learn from layout; drop `api`, `worker`, `api-client`, `providers`, `database`, `domain` |
 | Design tokens | Brand 50–900 scale, warm neutrals, semantic light/dark maps, type scale, `tokensToCssVars` | **Concept reused**, re-authored with glass, chart, six-tone status vocabulary and the brief's five anchors fixed |
 | Types | `Property → InvestmentPlan → InvestmentRound → Investment`, wallet accounts `AVAILABLE/RESERVED/BONUS/BONUS_PENDING`, minor-unit strings, bps | **Vocabulary reused**, reshaped as UI read-models (`@rentbrown/types`) |
-| Docs | `UX_IA_SPEC.md`, `DESIGN_DIRECTION.md`, `FINANCIAL_MODEL.md`, `DECISIONS.md` | Mined for IA, status vocabulary, fee/referral parameters used in mock policy (5 % withdrawal fee capped ₦10,000; ₦5,000 referral reward) |
+| Docs | `UX_IA_SPEC.md`, `DESIGN_DIRECTION.md`, `FINANCIAL_MODEL.md`, `DECISIONS.md` | Mined for IA, status vocabulary, fee/referral parameters used in mock policy (5 % withdrawal fee capped ₦10,000; ₦1,500 signup reward — corrected from the old repo's ₦5,000) |
 | UI code | Inline-styled skeleton pages, no design | Nothing reused |
 | Lessons | Client must never author balances; duplicate screen variants signal unsettled IA; a schema is not a feature | Encoded in the data-source boundary |
 

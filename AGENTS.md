@@ -1,7 +1,8 @@
 # RentBrown V2 — agent notes
 
 Nigerian-first property-investment platform. Canonical repo (fresh start).
-Product source of truth: `RENT_BROWN_MASTER_CONTEXT_AND_MEGA_AUDIT.md`. Plan: `docs/PHASE0_REPORT.md`.
+Product source of truth: `RENT_BROWN_MASTER_CONTEXT_AND_MEGA_AUDIT.md`.
+Plan: `docs/PHASE0_REPORT.md` · Phases: `docs/ROADMAP.md` · Decisions: `docs/DECISIONS.md`.
 
 ## Commands (Node ≥ 20, pnpm 9.15.9)
 
@@ -42,6 +43,8 @@ Packages are consumed as TypeScript source (no `dist`). `.npmrc` uses `node-link
 - Money = integer minor units (`MinorUnits`), rates = basis points, dates = ISO UTC strings.
   Format with `@rentbrown/utils` (`formatMoney`, `formatBps`, `formatDate`…). Never store money as strings.
 - Principal, expected profit and maturity value are always separate figures. Say "expected", never "guaranteed".
+- Referral policy: default signup reward = ₦1,500 (docs/DECISIONS.md D-001). Distinguish
+  signup reward · qualifying deposit · deposit-referral rate · deposit-referral cap.
 - Status colours use the six locked tones (`success · warning · error · info · pending · neutral`).
 - Tokens: edit `packages/design-tokens/src/tokens.ts`, mirror in `theme.css`; `pnpm lint` checks sync.
   Components use semantic utilities (`bg-primary`, `text-muted-foreground`, `glass`) — never raw hex.
