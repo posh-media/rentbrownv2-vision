@@ -1,21 +1,25 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans, DM_Serif_Display } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
 import { SiteHeader } from "../components/site-header";
 import { SiteFooter } from "../components/site-footer";
 import { appLinks, SITE_URL } from "../lib/site";
 
-const plusJakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+// Self-hosted (latin subset): production builds must not depend on a live
+// fonts.googleapis.com fetch — a cold build environment without it fails
+// page-data collection with an opaque error.
+const plusJakarta = localFont({
+  src: "../fonts/plus-jakarta-sans-var.woff2",
   variable: "--font-plus-jakarta",
+  display: "swap",
 });
 
-const dmSerif = DM_Serif_Display({
-  subsets: ["latin"],
-  weight: ["400"],
+const dmSerif = localFont({
+  src: "../fonts/dm-serif-display-400.woff2",
+  weight: "400",
   variable: "--font-dm-serif",
+  display: "swap",
 });
 
 const DESCRIPTION =

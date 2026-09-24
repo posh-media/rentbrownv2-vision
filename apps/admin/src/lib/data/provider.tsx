@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AdminActor, AdminDataSource, AdminRole, AuthGateway, Permission } from "@rentbrown/types";
 import { createMockAdminDataSource } from "@rentbrown/mock-data";
@@ -79,6 +80,7 @@ export function AdminDataProvider({ children }: { children: React.ReactNode }) {
 function AdminSession({ children }: { children: React.ReactNode }) {
   const { mode, client, gateway } = useAdminAuth();
   const queryClient = useQueryClient();
+  const router = useRouter();
 
   // Demo-mode role switcher state (localStorage). Ignored in Supabase mode.
   const [demoRole, setDemoRole] = React.useState<AdminRole>("FINANCE_ADMIN");
@@ -148,12 +150,12 @@ function AdminSession({ children }: { children: React.ReactNode }) {
     return gateway.onAuthStateChange((event) => {
       if (event === "SIGNED_OUT") {
         queryClient.clear();
-        window.location.assign("/login");
+        router.replace("/login");
       } else {
         queryClient.invalidateQueries({ queryKey: ["rb-admin"] });
       }
     });
-  }, [gateway, queryClient]);
+  }, [gateway, queryClient, router]);
 
   if (!hydrated) return null;
 

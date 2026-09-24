@@ -21,6 +21,16 @@ Recommended Vercel settings per project:
   shared workspace packages resolve.
 - **Ignored build step:** none required.
 
+## Fonts are self-hosted
+
+All three apps load Plus Jakarta Sans + DM Serif Display via
+`next/font/local` from `apps/<app>/src/fonts/*.woff2` — **not**
+`next/font/google`. Google Fonts are fetched at *build* time by
+`next/font/google`; on a cold build environment where that request fails,
+Turbopack surfaces it as an opaque `Failed to collect page data for
+/_not-found` worker error. Self-hosting keeps builds hermetic and removes
+the runtime privacy leak to Google. Do not reintroduce `next/font/google`.
+
 ## Environment variables
 
 Only public, non-secret variables exist. Copy each app's `.env.example` into
