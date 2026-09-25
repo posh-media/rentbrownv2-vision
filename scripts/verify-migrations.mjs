@@ -61,7 +61,7 @@ await admin.query(`
   create role service_role nologin;
   grant usage on schema public to authenticated, anon, service_role;
   create or replace function auth.uid() returns uuid language sql stable as
-    $$ select nullif(current_setting('request.jwt.claims', true)::jsonb ->> 'sub','')::uuid $$;
+    $$ select nullif(nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub','')::uuid $$;
   alter default privileges in schema public grant select, insert, update, delete on tables to authenticated;
   alter default privileges in schema public grant usage on sequences to authenticated;
 `);
@@ -423,6 +423,315 @@ await expectFail("investment_events client update denied", () =>
   asUser(uid3, "update public.investment_events set event_type='FAILED'"));
 await expectFail("investment_events client delete denied", () =>
   asUser(uid3, "delete from public.investment_events"));
+
+// ════════════════════════════════════════════════════════════════════════════
+// PHASE 4B — double-entry ledger + wallet
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── structure ────────────────────────────────────────────────────────────────
+r = await admin.query(`
+  select count(*)::int c from information_schema.tables
+  where table_schema='public' and table_name in
+  ('ledger_accounts','journal_entries','ledger_entries','wallets')`);
+check("all 4 Phase 4 tables exist", r.rows[0].c === 4, `found ${r.rows[0].c}`);
+
+r = await admin.query(`
+  select count(*)::int c from pg_type t join pg_namespace n on n.oid=t.typnamespace
+  where n.nspname='public' and t.typname in
+  ('ledger_account_kind','wallet_bucket','entry_direction','system_account_kind','journal_type')`);
+check("all 5 Phase 4 enums exist", r.rows[0].c === 5, `found ${r.rows[0].c}`);
+
+r = await admin.query(`select count(*)::int c from public.ledger_accounts where kind='SYSTEM'`);
+check("14 system accounts seeded (7 kinds x NGN/USD)", r.rows[0].c === 14, `found ${r.rows[0].c}`);
+
+// post_journal is service-only — authenticated must not reach it
+await expectFail("authenticated cannot call post_journal", () =>
+  asUser(uid2, `select public.post_journal('FUNDING_CREDIT','NGN','[]'::jsonb,null,'k')`));
+
+// ── funding: balanced post, lazy provisioning, wallet effect ─────────────────
+const postJ = (type, cur, lines, key, extra = "") =>
+  admin.query(
+    `select * from public.post_journal('${type}'::public.journal_type,'${cur}'::public.currency_code,'${lines}'::jsonb,null,'${key}',null,null,'SYSTEM',null,null,'test', '{}' ::jsonb${extra})`,
+  ).then((x) => x.rows[0]);
+
+const funding = await postJ(
+  "FUNDING_CREDIT", "NGN",
+  `[{"account_key":"system:deposits_clearing","direction":"DEBIT","amount_minor":100000},
+    {"account_key":"user:${uid4}:available","direction":"CREDIT","amount_minor":100000}]`,
+  "dep:test-1",
+);
+check("funding journal posted", !!funding?.id);
+
+r = await admin.query("select * from public.wallets where user_id=$1 and currency='NGN'", [uid4]);
+check("wallet lazily provisioned", r.rows.length === 1);
+check("available credited 100000", r.rows[0].available_minor === "100000", r.rows[0].available_minor);
+
+r = await admin.query("select count(*)::int c from public.ledger_entries where journal_id=$1", [funding.id]);
+check("journal has 2 lines", r.rows[0].c === 2);
+r = await admin.query(`select e.balance_after_minor from public.ledger_entries e
+  join public.ledger_accounts a on a.id=e.account_id
+  where e.journal_id=$1 and a.kind='USER'`, [funding.id]);
+check("balance_after snapshot = 100000", r.rows[0].balance_after_minor === "100000", r.rows[0].balance_after_minor);
+
+// ── idempotent replay ─────────────────────────────────────────────────────────
+const replay = await postJ(
+  "FUNDING_CREDIT", "NGN",
+  `[{"account_key":"system:deposits_clearing","direction":"DEBIT","amount_minor":100000},
+    {"account_key":"user:${uid4}:available","direction":"CREDIT","amount_minor":100000}]`,
+  "dep:test-1",
+);
+check("replay returns same journal", replay?.id === funding.id);
+r = await admin.query("select available_minor from public.wallets where user_id=$1 and currency='NGN'", [uid4]);
+check("replay had no second financial effect", r.rows[0].available_minor === "100000");
+r = await admin.query("select count(*)::int c from public.journal_entries");
+check("still exactly one journal", r.rows[0].c === 1);
+
+// ── hard invariants ────────────────────────────────────────────────────────────
+await expectFail("unbalanced journal rejected", () =>
+  postJ("FUNDING_CREDIT", "NGN",
+    `[{"account_key":"system:deposits_clearing","direction":"DEBIT","amount_minor":1000},
+      {"account_key":"user:${uid4}:available","direction":"CREDIT","amount_minor":999}]`,
+    "dep:bad-1"));
+await expectFail("single-line journal rejected", () =>
+  postJ("FUNDING_CREDIT", "NGN",
+    `[{"account_key":"system:deposits_clearing","direction":"DEBIT","amount_minor":1000}]`,
+    "dep:bad-2"));
+await expectFail("balanced but wrong shape rejected (FUNDING_CREDIT → RESERVED)", () =>
+  postJ("FUNDING_CREDIT", "NGN",
+    `[{"account_key":"system:deposits_clearing","direction":"DEBIT","amount_minor":1000},
+      {"account_key":"user:${uid4}:reserved","direction":"CREDIT","amount_minor":1000}]`,
+    "dep:bad-3"));
+await expectFail("balanced user-only journal rejected as FUNDING_CREDIT", () =>
+  postJ("FUNDING_CREDIT", "NGN",
+    `[{"account_key":"user:${uid4}:available","direction":"DEBIT","amount_minor":1000},
+      {"account_key":"user:${uid4}:reserved","direction":"CREDIT","amount_minor":1000}]`,
+    "dep:bad-4"));
+await expectFail("non-positive amount rejected", () =>
+  postJ("FUNDING_CREDIT", "NGN",
+    `[{"account_key":"system:deposits_clearing","direction":"DEBIT","amount_minor":0},
+      {"account_key":"user:${uid4}:available","direction":"CREDIT","amount_minor":0}]`,
+    "dep:bad-5"));
+await expectFail("unknown system account rejected", () =>
+  postJ("FUNDING_CREDIT", "NGN",
+    `[{"account_key":"system:nonsense","direction":"DEBIT","amount_minor":1000},
+      {"account_key":"user:${uid4}:available","direction":"CREDIT","amount_minor":1000}]`,
+    "dep:bad-6"));
+
+// ── lazy provisioning rolls back with a failed posting ────────────────────────
+const uid5 = "55555555-5555-5555-5555-555555555555";
+await admin.query(`insert into auth.users (id, email, raw_user_meta_data) values ($1,'fresh@example.com','{"username":"fresh"}')`, [uid5]);
+await expectFail("HOLD exceeding zero balance fails", () =>
+  postJ("HOLD", "NGN",
+    `[{"account_key":"user:${uid5}:available","direction":"DEBIT","amount_minor":5000},
+      {"account_key":"user:${uid5}:reserved","direction":"CREDIT","amount_minor":5000}]`,
+    "hold:fresh-1"));
+r = await admin.query("select count(*)::int c from public.wallets where user_id=$1", [uid5]);
+check("failed posting left no wallet row", r.rows[0].c === 0);
+r = await admin.query("select count(*)::int c from public.ledger_accounts where owner_user_id=$1", [uid5]);
+check("failed posting left no accounts", r.rows[0].c === 0);
+r = await admin.query("select count(*)::int c from public.journal_entries where idempotency_key='hold:fresh-1'");
+check("failed posting left no journal", r.rows[0].c === 0);
+
+// ── hold / release flows ──────────────────────────────────────────────────────
+const hold = await postJ(
+  "HOLD", "NGN",
+  `[{"account_key":"user:${uid4}:available","direction":"DEBIT","amount_minor":40000},
+    {"account_key":"user:${uid4}:reserved","direction":"CREDIT","amount_minor":40000}]`,
+  "hold:test-1",
+);
+check("hold posted", !!hold?.id);
+r = await admin.query("select available_minor, reserved_minor from public.wallets where user_id=$1 and currency='NGN'", [uid4]);
+check("hold moved 40000 available→reserved", r.rows[0].available_minor === "60000" && r.rows[0].reserved_minor === "40000",
+  `${r.rows[0].available_minor}/${r.rows[0].reserved_minor}`);
+
+await postJ(
+  "HOLD_RELEASE", "NGN",
+  `[{"account_key":"user:${uid4}:reserved","direction":"DEBIT","amount_minor":40000},
+    {"account_key":"user:${uid4}:available","direction":"CREDIT","amount_minor":40000}]`,
+  "rel:test-1",
+);
+r = await admin.query("select available_minor, reserved_minor from public.wallets where user_id=$1 and currency='NGN'", [uid4]);
+check("release restored balances", r.rows[0].available_minor === "100000" && r.rows[0].reserved_minor === "0");
+
+await expectFail("HOLD beyond available rejected (insufficient funds)", () =>
+  postJ("HOLD", "NGN",
+    `[{"account_key":"user:${uid4}:available","direction":"DEBIT","amount_minor":999999},
+      {"account_key":"user:${uid4}:reserved","direction":"CREDIT","amount_minor":999999}]`,
+    "hold:too-big"));
+
+// ── currency isolation ────────────────────────────────────────────────────────
+await postJ(
+  "FUNDING_CREDIT", "USD",
+  `[{"account_key":"system:deposits_clearing","direction":"DEBIT","amount_minor":5000},
+    {"account_key":"user:${uid4}:available","direction":"CREDIT","amount_minor":5000}]`,
+  "dep:usd-1",
+);
+r = await admin.query("select available_minor from public.wallets where user_id=$1 and currency='USD'", [uid4]);
+check("USD wallet provisioned separately", r.rows[0].available_minor === "5000");
+r = await admin.query("select available_minor from public.wallets where user_id=$1 and currency='NGN'", [uid4]);
+check("NGN balance untouched by USD posting", r.rows[0].available_minor === "100000");
+
+// hard cross-currency rejection via deferred trigger (bypasses post_journal)
+const usdAcct = (await admin.query("select id from public.ledger_accounts where key='system:deposits_clearing:USD'")).rows[0].id;
+const ngnAcct = (await admin.query("select id from public.ledger_accounts where key='system:deposits_clearing:NGN'")).rows[0].id;
+await expectFail("cross-currency journal rejected at commit", async () => {
+  await admin.query("begin");
+  await admin.query(`insert into public.journal_entries (reference,idempotency_key,journal_type,currency,description)
+    values ('JRN-XCUR','xcur-1','FUNDING_CREDIT','NGN','x')`);
+  await admin.query(`insert into public.ledger_entries (journal_id,account_id,direction,amount_minor)
+    select id,$1,'DEBIT',100 from public.journal_entries where idempotency_key='xcur-1'`, [usdAcct]);
+  await admin.query(`insert into public.ledger_entries (journal_id,account_id,direction,amount_minor)
+    select id,$1,'CREDIT',100 from public.journal_entries where idempotency_key='xcur-1'`, [ngnAcct]);
+  await admin.query("commit");
+});
+await admin.query("rollback").catch(() => {});
+r = await admin.query("select count(*)::int c from public.journal_entries where idempotency_key='xcur-1'");
+check("cross-currency journal rolled back", r.rows[0].c === 0);
+
+// unbalanced direct insert also rejected at commit
+await expectFail("unbalanced direct insert rejected at commit", async () => {
+  await admin.query("begin");
+  await admin.query(`insert into public.journal_entries (reference,idempotency_key,journal_type,currency,description)
+    values ('JRN-UNBAL','unbal-1','FUNDING_CREDIT','NGN','x')`);
+  await admin.query(`insert into public.ledger_entries (journal_id,account_id,direction,amount_minor)
+    select id,$1,'DEBIT',100 from public.journal_entries where idempotency_key='unbal-1'`, [ngnAcct]);
+  await admin.query("commit");
+});
+await admin.query("rollback").catch(() => {});
+
+// ── immutability (even for superuser) ─────────────────────────────────────────
+await expectFail("journal_entries update blocked", () =>
+  admin.query("update public.journal_entries set description='x' where id=$1", [funding.id]));
+await expectFail("journal_entries delete blocked", () =>
+  admin.query("delete from public.journal_entries where id=$1", [funding.id]));
+await expectFail("ledger_entries update blocked", () =>
+  admin.query("update public.ledger_entries set amount_minor=1"));
+await expectFail("ledger_entries delete blocked", () =>
+  admin.query("delete from public.ledger_entries"));
+await expectFail("ledger_accounts delete blocked", () =>
+  admin.query("delete from public.ledger_accounts where key='system:adjustments:NGN'"));
+
+// ── wallet write guard ─────────────────────────────────────────────────────────
+await expectFail("direct wallet update blocked (even postgres)", () =>
+  admin.query("update public.wallets set available_minor=0 where user_id=$1", [uid4]));
+await expectFail("direct wallet insert blocked", () =>
+  admin.query("insert into public.wallets (user_id,currency) values ($1,'USD')", [uid5]));
+await expectFail("wallet delete blocked", () =>
+  admin.query("delete from public.wallets where user_id=$1", [uid4]));
+
+// ── reversal ───────────────────────────────────────────────────────────────────
+r = await admin.query("select * from public.reverse_journal($1,'test reversal','rev-req-1')", [funding.id]);
+const reversal = r.rows[0];
+check("reversal journal created", reversal?.journal_type === "REVERSAL" && reversal?.reverses_journal_id === funding.id);
+r = await admin.query(`select e.direction, e.amount_minor from public.ledger_entries e
+  join public.ledger_accounts a on a.id=e.account_id
+  where e.journal_id=$1 order by e.id`, [reversal.id]);
+check("reversal mirrors original lines", r.rows.length === 2 &&
+  r.rows[0].direction === "CREDIT" && r.rows[1].direction === "DEBIT" &&
+  r.rows.every((x) => x.amount_minor === "100000"), JSON.stringify(r.rows));
+r = await admin.query("select available_minor from public.wallets where user_id=$1 and currency='NGN'", [uid4]);
+check("reversal restored wallet to 0", r.rows[0].available_minor === "0", r.rows[0].available_minor);
+
+await expectFail("duplicate reversal rejected", () =>
+  admin.query("select public.reverse_journal($1,'again','rev-req-2')", [funding.id]));
+r = await admin.query("select count(*)::int c from public.journal_entries where reverses_journal_id=$1", [funding.id]);
+check("still exactly one reversal", r.rows[0].c === 1);
+await expectFail("cannot reverse a REVERSAL", () =>
+  admin.query("select public.reverse_journal($1,'x',null)", [reversal.id]));
+await expectFail("reversal without reason rejected", () =>
+  admin.query("select public.reverse_journal($1,'  ',null)", [funding.id]));
+await expectFail("investor cannot reverse journals", () =>
+  asUser(uid2, "select public.reverse_journal($1,'x',null)", [funding.id]));
+
+// ── admin adjustment (gated, reasoned, audited, balanced) ──────────────────────
+// uid1 = FINANCE_ADMIN (granted above); uid4 = OPERATIONS_ADMIN; uid3 = SUPER_ADMIN
+await expectFail("adjustment without reason rejected", () =>
+  asUser(uid1, `select public.admin_post_adjustment('${uid4}','NGN','AVAILABLE',5000,'CREDIT',' ',null,null)`));
+await expectFail("OPERATIONS_ADMIN cannot adjust", () =>
+  asUser(uid4, `select public.admin_post_adjustment('${uid2}','NGN','AVAILABLE',5000,'CREDIT','r',null,null)`));
+await expectFail("anonymous cannot adjust", () =>
+  asAnon(`select public.admin_post_adjustment('${uid2}','NGN','AVAILABLE',5000,'CREDIT','r',null,null)`));
+
+await admin.query("begin");
+await admin.query("set local role authenticated");
+await admin.query(`set local request.jwt.claims = '{"sub":"${uid1}"}'`);
+r = await admin.query(
+  `select * from public.admin_post_adjustment('${uid2}','NGN','AVAILABLE',7500,'CREDIT','correction #42','adj-req-1','adj:test-1')`);
+const adj = r.rows[0];
+await admin.query("commit");
+check("FINANCE_ADMIN adjustment posted", adj?.journal_type === "ADMIN_ADJUSTMENT");
+r = await admin.query("select available_minor from public.wallets where user_id=$1 and currency='NGN'", [uid2]);
+check("adjustment credited wallet", r.rows[0].available_minor === "7500", r.rows[0].available_minor);
+r = await admin.query(`select result, actor_id, action from public.audit_log
+  where entity_type='wallet' and action='wallet.adjust' order by created_at desc limit 1`);
+check("adjustment wrote audit row", r.rows.length === 1 && r.rows[0].result === "SUCCESS" && r.rows[0].actor_id === uid1);
+r = await admin.query(`select count(*)::int c from public.ledger_entries e join public.ledger_accounts a on a.id=e.account_id
+  where e.journal_id=$1 and a.system_kind='ADJUSTMENTS'`, [adj.id]);
+check("adjustment balanced via ADJUSTMENTS contra", r.rows[0].c === 1);
+
+await expectFail("debit adjustment beyond balance rejected", () =>
+  asUser(uid1, `select public.admin_post_adjustment('${uid2}','NGN','AVAILABLE',99999999,'DEBIT','r',null,null)`));
+
+// ── reconciliation: stored projection == ledger-derived ────────────────────────
+r = await admin.query("select count(*)::int c from public.reconcile_wallets()");
+check("reconciliation clean (no diffs)", r.rows[0].c === 0, `diffs: ${r.rows[0].c}`);
+
+// ── concurrency: competing holds serialize on the wallet row ──────────────────
+// uid4's NGN wallet is at 0 after the funding reversal above — re-fund to 80000
+await admin.query(`select public.post_journal('FUNDING_CREDIT','NGN',
+  '[{"account_key":"user:${uid4}:available","direction":"CREDIT","amount_minor":80000},
+    {"account_key":"system:deposits_clearing","direction":"DEBIT","amount_minor":80000}]'::jsonb,
+  null,'race:fund',null,null,'SYSTEM',null,null,'race')`);
+const c2 = new pg.Client({ host: "127.0.0.1", port: 55432, user: "postgres", password: "postgres", database: "verify" });
+await c2.connect();
+const holdSql = `select public.post_journal('HOLD','NGN',
+  '[{"account_key":"user:${uid4}:available","direction":"DEBIT","amount_minor":80000},
+    {"account_key":"user:${uid4}:reserved","direction":"CREDIT","amount_minor":80000}]'::jsonb,
+  null,'hold:race-' || $1,null,null,'SYSTEM',null,null,'race')`;
+const [h1, h2] = await Promise.allSettled([
+  admin.query(holdSql, ["a"]),
+  c2.query(holdSql, ["b"]),
+]);
+const okCount = [h1, h2].filter((x) => x.status === "fulfilled").length;
+check("concurrent holds: exactly one wins", okCount === 1, `ok=${okCount}`);
+r = await admin.query("select available_minor, reserved_minor from public.wallets where user_id=$1 and currency='NGN'", [uid4]);
+check("post-race wallet consistent", r.rows[0].available_minor === "0" && r.rows[0].reserved_minor === "80000",
+  `${r.rows[0].available_minor}/${r.rows[0].reserved_minor}`);
+await c2.end();
+
+// ── RLS boundaries ─────────────────────────────────────────────────────────────
+r = await asUser(uid4, "select user_id, currency, available_minor, reserved_minor from public.wallets");
+check("investor reads own wallets only", r.rows.length === 2 && r.rows.every((x) => x.user_id === uid4));
+r = await asUser(uid2, "select count(*)::int c from public.wallets");
+check("other investor sees only own wallet", r.rows[0].c === 1);
+await expectFail("anon cannot read wallets", () => asAnon("select * from public.wallets"));
+
+r = await asUser(uid4, "select count(*)::int c from public.journal_entries");
+check("owner sees own journals", r.rows[0].c >= 3, `saw ${r.rows[0].c}`);
+r = await asUser(uid2, "select count(*)::int c from public.journal_entries");
+check("other user sees only own journals (1 adj)", r.rows[0].c === 1, `saw ${r.rows[0].c}`);
+r = await asUser(uid2, "select count(*)::int c from public.ledger_entries");
+check("other user sees only own-account lines (contra leg hidden)", r.rows[0].c === 1, `saw ${r.rows[0].c}`);
+r = await asUser(uid1, "select count(*)::int c from public.journal_entries");
+check("finance admin reads all journals", r.rows[0].c >= 6, `saw ${r.rows[0].c}`);
+
+await expectFail("client cannot insert journal", () =>
+  asUser(uid4, `insert into public.journal_entries (reference,idempotency_key,journal_type,currency) values ('x','x','HOLD','NGN')`));
+await expectFail("client cannot insert ledger line", () =>
+  asUser(uid4, `insert into public.ledger_entries (journal_id,account_id,direction,amount_minor) values (gen_random_uuid(),gen_random_uuid(),'DEBIT',1)`));
+
+// transaction feed projection
+r = await asUser(uid4, "select journal_type, direction, bucket, amount_minor from public.get_wallet_transactions()");
+check("wallet feed returns own lines", r.rows.length >= 4 && r.rows.every((x) => x.journal_type), `rows=${r.rows.length}`);
+await expectFail("feed denied when signed out", () =>
+  asAnon("select * from public.get_wallet_transactions()"));
+
+// ── migration tracking convention untouched ──────────────────────────────────
+r = await admin.query(`select count(*)::int c from information_schema.tables
+  where table_name='schema_migrations' and table_schema not in ('public')`);
+check("no competing migration tracker introduced", r.rows[0].c === 0);
+r = await admin.query(`select count(*)::int c from information_schema.schemata where schema_name='supabase_migrations'`);
+check("no supabase_migrations schema created", r.rows[0].c === 0);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 await admin.end();

@@ -69,3 +69,26 @@ Two Phase 3 decisions, locked by the Phase 3A proposal and implemented in 3B:
    never depend on live config (investments carry snapshots).
 
 Status: accepted · Scope: `supabase/migrations/0002–0004`, Phase 4+ engines.
+
+## D-004 Double-entry ledger is the financial source of truth (2026-09)
+
+Phase 4A proposal (docs/phases/PHASE_4A_LEDGER_WALLET_PROPOSAL.md) approved in
+full — D-4.1 through D-4.10. Key decisions:
+
+- `wallets` is a materialized projection, never an independent truth; only
+  `post_journal` may write it (trigger-gated via `app.ledger_posting`).
+- `post_journal` is service-role only; user-facing flows get narrow definer
+  RPCs that authorize then delegate.
+- Balanced ≠ valid: `assert_journal_shape` enforces each journal_type's
+  permitted account/direction multiset.
+- History is append-only; corrections are mirror REVERSAL journals (one per
+  journal, enforced by partial unique index).
+- BONUS is not directly withdrawable (BONUS_RELEASE → AVAILABLE); PENDING is
+  deposit staging; system contra accounts may go negative, user buckets may
+  not; `balance_after_minor` is display-only; no journal status column;
+  single `INVESTMENT_PRINCIPAL_PAYABLE` with investment-level traceability
+  via entity/request/metadata; USD seeded dormant, no FX path.
+- Idempotency is a DB invariant (`idempotency_key` unique — replays converge).
+
+Status: accepted · Scope: `supabase/migrations/0005–0007`, Phase 5+ financial
+engines.

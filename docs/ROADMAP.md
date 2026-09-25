@@ -46,10 +46,12 @@ approved. Phase 3B (schema implementation): `0002–0004` migrations +
 84-check verifier, locally verified; hosted apply blocked on stale DB
 credentials. See `docs/phases/PHASE_3B_IMPLEMENTATION_REPORT.md`.
 
-## PHASE 4 — Ledger + Wallet
+## PHASE 4 — Ledger + Wallet — **DONE (4A proposal + 4B implemented & verified on hosted Supabase)**
 
 Double-entry financial model, balances (available / reserved / bonus /
-pending), immutable entries, reconciliation, idempotency, financial invariants.
+pending), immutable entries, reconciliation, idempotency, financial
+invariants. Migrations `0005–0007`; see
+`docs/phases/PHASE_4B_LEDGER_IMPLEMENTATION_REPORT.md`.
 
 ## PHASE 5 — Deposits + Payment Providers
 
