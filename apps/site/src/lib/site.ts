@@ -5,6 +5,7 @@
  */
 import type { ProofDocumentStatus, StatusTone } from "@rentbrown/types";
 import { createPublicCatalogueSource } from "@rentbrown/mock-data";
+import { absoluteUrl } from "@rentbrown/utils";
 
 /** One shared read-only catalogue for every page render. */
 export const catalogue = createPublicCatalogueSource();
@@ -14,8 +15,10 @@ export function propertyImage(key: string): string {
   return `/properties/${key}.jpg`;
 }
 
-export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3003";
-const WEB_URL = process.env.NEXT_PUBLIC_WEB_URL ?? "http://localhost:3000";
+// Env origins may arrive without a scheme (e.g. "rentbrown.vercel.app") —
+// absoluteUrl normalizes; it never throws at module scope.
+export const SITE_URL = absoluteUrl(process.env.NEXT_PUBLIC_SITE_URL, "http://localhost:3003");
+const WEB_URL = absoluteUrl(process.env.NEXT_PUBLIC_WEB_URL, "http://localhost:3000");
 
 /** Account actions live on the investor app, not this site. */
 export const appLinks = {

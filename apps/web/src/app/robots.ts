@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
+import { absoluteUrl } from "@rentbrown/utils";
 
-const base = process.env.NEXT_PUBLIC_WEB_URL ?? "http://localhost:3000";
+const base = absoluteUrl(process.env.NEXT_PUBLIC_WEB_URL, "http://localhost:3000");
 
 export default function robots(): MetadataRoute.Robots {
   return {

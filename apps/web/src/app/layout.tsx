@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { Providers } from "../components/providers";
+import { absoluteUrl } from "@rentbrown/utils";
 
 // Self-hosted (latin subset): production builds must not depend on a live
 // fonts.googleapis.com fetch — a cold build environment without it fails
@@ -20,7 +21,9 @@ const dmSerif = localFont({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_WEB_URL ?? "http://localhost:3000"),
+  // Env origin may lack a scheme — absoluteUrl normalizes instead of throwing
+  // at module scope during page-data collection.
+  metadataBase: new URL(absoluteUrl(process.env.NEXT_PUBLIC_WEB_URL, "http://localhost:3000")),
   title: {
     default: "RentBrown",
     template: "%s · RentBrown",

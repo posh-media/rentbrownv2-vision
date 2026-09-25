@@ -1,7 +1,8 @@
 import type { MetadataRoute } from "next";
 import { createPublicCatalogueSource, properties } from "@rentbrown/mock-data";
+import { absoluteUrl } from "@rentbrown/utils";
 
-const base = process.env.NEXT_PUBLIC_WEB_URL ?? "http://localhost:3000";
+const base = absoluteUrl(process.env.NEXT_PUBLIC_WEB_URL, "http://localhost:3000");
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const content = await createPublicCatalogueSource().getContent();

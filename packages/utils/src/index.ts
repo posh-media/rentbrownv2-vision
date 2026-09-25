@@ -221,4 +221,23 @@ export function idempotencyKey(prefix = "rb"): string {
   return `${prefix}-${Date.now().toString(36)}-${rand}`;
 }
 
+/**
+ * Normalize an env-provided origin ("https://x.com", "x.com", undefined) into
+ * a valid absolute URL for `new URL()` / metadata / sitemap use.
+ *
+ * Bare hosts get `https://`; anything still unparseable falls back. Never
+ * throws — env URLs are evaluated at module scope during Next.js page-data
+ * collection, where a throw surfaces as an opaque build failure.
+ */
+export function absoluteUrl(value: string | undefined | null, fallback: string): string {
+  const raw = (value ?? "").trim();
+  const candidate = raw === "" ? fallback : /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const url = new URL(candidate);
+    return url.origin;
+  } catch {
+    return new URL(fallback).origin;
+  }
+}
+
 export * from "./status";
