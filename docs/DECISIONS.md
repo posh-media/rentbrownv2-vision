@@ -92,3 +92,17 @@ full — D-4.1 through D-4.10. Key decisions:
 
 Status: accepted · Scope: `supabase/migrations/0005–0007`, Phase 5+ financial
 engines.
+
+## D-005 Deposits/payment infrastructure (IMPLEMENTED — Phase 5B)
+
+Phase 5A proposal: docs/phases/PHASE_5A_DEPOSIT_PAYMENT_ARCHITECTURE.md.
+Key proposals (D-5.1–D-5.9 in the doc): verified-success → `FUNDING_CREDIT`;
+provider reversals are `REVERSAL` journals; secrets live in Edge Function
+env secrets (admin_config carries markers only); webhook endpoint URLs are
+admin-visible operational config; withdrawals are manual with a durable
+outbound outbox to Make; deposits are NGN-only via Paystack/KoraPay with a
+provider seam for a future international provider.
+
+Status: accepted · implemented in Phase 5B — see
+docs/phases/PHASE_5B_IMPLEMENTATION_REPORT.md · Scope: `0008–0011`,
+Edge Functions (init + 2 webhooks + outbox worker), admin payment overview.

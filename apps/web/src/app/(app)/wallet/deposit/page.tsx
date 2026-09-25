@@ -10,33 +10,40 @@ import {
   cn,
 } from "@rentbrown/ui";
 import { CreditCard, Landmark } from "lucide-react";
-import type { DepositMethod, MinorUnits } from "@rentbrown/types";
+import type { DepositMethod, MinorUnits, PaymentProvider } from "@rentbrown/types";
 import { formatMoney, idempotencyKey } from "@rentbrown/utils";
 
-import { useCreateDeposit, useWallet } from "../../../../lib/data/hooks";
+import { useCreateDeposit, useDepositOptions, useWallet } from "../../../../lib/data/hooks";
 import { useRequireSession } from "../../../../lib/session";
 import { PageHeader } from "../../../../components/layout/page-header";
 import { PageSkeleton } from "../../../../components/layout/page-skeleton";
 
 const CHIPS = [10_000, 50_000, 100_000, 250_000]; // major units
 
-const methods: Array<{ source: DepositMethod; icon: typeof Landmark; label: string; hint: string; recommended?: boolean }> = [
-  { source: "BANK_TRANSFER", icon: Landmark, label: "Bank transfer", hint: "Usually credited within minutes", recommended: true },
-  { source: "CARD", icon: CreditCard, label: "Debit card", hint: "Cards issued by Nigerian banks" },
-];
+/** Provider → wire method for the intent contract (server enforces the rail). */
+const PROVIDER_METHOD: Record<PaymentProvider, DepositMethod> = {
+  PAYSTACK: "CARD",
+  KORAPAY: "BANK_TRANSFER",
+};
+
+const PROVIDER_META: Record<PaymentProvider, { icon: typeof Landmark; label: string; hint: string }> = {
+  PAYSTACK: { icon: CreditCard, label: "Paystack", hint: "Card, bank transfer & USSD via Paystack checkout" },
+  KORAPAY: { icon: Landmark, label: "KoraPay", hint: "Card & bank transfer via KoraPay checkout" },
+};
 
 export default function DepositPage() {
   const session = useRequireSession();
   const wallet = useWallet();
+  const options = useDepositOptions();
   const createDeposit = useCreateDeposit();
   const router = useRouter();
 
   const [step, setStep] = React.useState(0);
   const [amount, setAmount] = React.useState<MinorUnits | null>(null);
-  const [method, setMethod] = React.useState<DepositMethod>("BANK_TRANSFER");
+  const [provider, setProvider] = React.useState<PaymentProvider | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
-  if (session.isPending || wallet.isPending) return <PageSkeleton />;
+  if (session.isPending || wallet.isPending || options.isPending) return <PageSkeleton />;
   if (wallet.isError) {
     return (
       <StatePanel
@@ -52,14 +59,25 @@ export default function DepositPage() {
     );
   }
 
-  const min = wallet.data.policies.minDeposit;
-  const amountOk = amount !== null && amount >= min;
+  const min = options.data?.minDeposit ?? wallet.data.policies.minDeposit;
+  const max = options.data?.maxDeposit ?? null;
+  // Server-configured providers only — a disabled rail is never selectable.
+  const available = options.data?.providers.filter((p) => p.enabled) ?? [];
+  const selectedProvider = provider && available.some((p) => p.id === provider)
+    ? provider
+    : available[0]?.id ?? null;
+  const amountOk = amount !== null && amount >= min && (max === null || amount <= max);
 
   const submit = async () => {
-    if (amount === null) return;
+    if (amount === null || selectedProvider === null) return;
     setError(null);
     try {
-      const intent = await createDeposit.mutateAsync({ amount, method, idempotencyKey: idempotencyKey() });
+      const intent = await createDeposit.mutateAsync({
+        amount,
+        method: PROVIDER_METHOD[selectedProvider],
+        provider: selectedProvider,
+        idempotencyKey: idempotencyKey(),
+      });
       router.push(`/wallet/deposit/${intent.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "The deposit could not be started.");
@@ -103,7 +121,8 @@ export default function DepositPage() {
             ))}
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            Minimum {formatMoney(min, "NGN")} · No deposit fee
+            Minimum {formatMoney(min, "NGN")}
+            {max !== null ? ` · Maximum ${formatMoney(max, "NGN")}` : ""} · No deposit fee
           </p>
           <Button size="lg" className="mt-5 w-full" disabled={!amountOk} onClick={() => setStep(1)}>
             Continue
@@ -113,40 +132,44 @@ export default function DepositPage() {
 
       {step === 1 ? (
         <div className="financial-card p-5 sm:p-6">
-          <h2 className="text-base font-bold text-foreground">Choose a method</h2>
-          <div role="radiogroup" aria-label="Deposit method" className="mt-4 flex flex-col gap-2.5">
-            {methods.map((m) => {
-              const Icon = m.icon;
-              const selected = method === m.source;
-              return (
-                <button
-                  key={m.source}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  onClick={() => setMethod(m.source)}
-                  className={cn(
-                    "flex min-h-11 items-start gap-3 rounded-lg border p-4 text-left transition-colors",
-                    selected ? "border-primary bg-accent" : "border-border hover:bg-surface-subtle",
-                  )}
-                >
-                  <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-md", selected ? "bg-primary text-primary-foreground" : "bg-secondary-soft text-primary")}>
-                    <Icon className="size-4.5" aria-hidden />
-                  </span>
-                  <span>
-                    <span className="flex items-center gap-2 text-sm font-bold text-foreground">
-                      {m.label}
-                      {m.recommended ? (
-                        <span className="rounded-full bg-success-soft px-2 py-0.5 text-[10px] font-bold text-[var(--success-fg)]">
-                          Recommended
-                        </span>
-                      ) : null}
+          <h2 className="text-base font-bold text-foreground">Choose a provider</h2>
+          <div role="radiogroup" aria-label="Deposit provider" className="mt-4 flex flex-col gap-2.5">
+            {available.length === 0 ? (
+              <StatePanel
+                tone="warning"
+                title="No deposit providers available"
+                copy="Online deposits are temporarily unavailable. Please try again later."
+              />
+            ) : (
+              available.map((p) => {
+                const meta = PROVIDER_META[p.id];
+                const Icon = meta.icon;
+                const selected = selectedProvider === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setProvider(p.id)}
+                    className={cn(
+                      "flex min-h-11 items-start gap-3 rounded-lg border p-4 text-left transition-colors",
+                      selected ? "border-primary bg-accent" : "border-border hover:bg-surface-subtle",
+                    )}
+                  >
+                    <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-md", selected ? "bg-primary text-primary-foreground" : "bg-secondary-soft text-primary")}>
+                      <Icon className="size-4.5" aria-hidden />
                     </span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">{m.hint}</span>
-                  </span>
-                </button>
-              );
-            })}
+                    <span>
+                      <span className="flex items-center gap-2 text-sm font-bold text-foreground">
+                        {meta.label}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">{meta.hint}</span>
+                    </span>
+                  </button>
+                );
+              })
+            )}
           </div>
           <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row">
             <Button variant="outline" onClick={() => setStep(0)} className="sm:w-auto">
@@ -155,7 +178,7 @@ export default function DepositPage() {
             <Button
               size="lg"
               className="flex-1"
-              disabled={createDeposit.isPending}
+              disabled={createDeposit.isPending || selectedProvider === null}
               onClick={() => void submit()}
             >
               {createDeposit.isPending ? "Starting…" : `Continue · ${formatMoney(amount ?? 0)}`}

@@ -361,6 +361,22 @@ export interface DepositIntent {
   createdAt: ISODateString;
   creditedAt: ISODateString | null;
   transferInstructions?: VirtualAccount;
+  /** Hosted provider checkout — open to complete payment (Paystack/KoraPay). */
+  checkoutUrl?: string | null;
+}
+
+/** Payment rail behind a deposit — the wire-level choice (Phase 5B). */
+export type PaymentProvider = "PAYSTACK" | "KORAPAY";
+
+/** Non-secret init options served to the investor UI by `deposit_options()`. */
+export interface DepositOptions {
+  currency: CurrencyCode;
+  minDeposit: MinorUnits;
+  /** Null when no approved cap is configured — no client-invented maximum. */
+  maxDeposit: MinorUnits | null;
+  /** Null when no approved expiry window is configured. */
+  expiryMinutes: number | null;
+  providers: Array<{ id: PaymentProvider; enabled: boolean }>;
 }
 
 // ── Withdrawals ──────────────────────────────────────────────────────────────
@@ -761,6 +777,8 @@ export interface CreateDepositInput {
   amount: MinorUnits;
   method: DepositMethod;
   idempotencyKey: string;
+  /** Payment rail (real backend); mock ignores it. Defaults server-side to PAYSTACK. */
+  provider?: PaymentProvider;
 }
 
 export interface RequestWithdrawalInput {
@@ -806,6 +824,7 @@ export interface InvestorDataSource {
   getWallet(): Promise<WalletSummary>;
   listTransactions(filter?: TransactionFilter): Promise<Transaction[]>;
   getTransaction(id: string): Promise<Transaction | null>;
+  getDepositOptions(): Promise<DepositOptions>;
   createDeposit(input: CreateDepositInput): Promise<DepositIntent>;
   getDeposit(id: string): Promise<DepositIntent | null>;
   quoteWithdrawal(amount: MinorUnits, destinationId?: string): Promise<WithdrawalQuote>;

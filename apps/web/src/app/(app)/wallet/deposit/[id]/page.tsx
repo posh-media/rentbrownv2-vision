@@ -81,25 +81,50 @@ export default function DepositStatusPage() {
       <div className="financial-card w-full p-6 sm:p-10">
         {status === "AWAITING_TRANSFER" ? (
           <>
-            <StatePanel tone="warning" title="Make your transfer" />
-            {d?.transferInstructions ? (
-              <TransferInstructions
-                instructions={d.transferInstructions}
-                amount={d.amount}
-                currency={d.currency}
-              />
-            ) : null}
-            <p className="mt-4 text-sm text-muted-foreground">
-              Use only a bank account in your name. Your wallet updates after confirmation.
-            </p>
-            <div className="mt-6 flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => toast.success("Thanks — we'll confirm within minutes")}>
-                I&apos;ve sent it
-              </Button>
-              <Button variant="ghost" asChild>
-                <Link href="/wallet">Back to wallet</Link>
-              </Button>
-            </div>
+            <StatePanel tone="warning" title="Complete your payment" />
+            {d?.checkoutUrl ? (
+              <>
+                <p className="mt-4 text-sm text-muted-foreground">
+                  Continue to the secure {d.method === "CARD" ? "Paystack" : "KoraPay"} checkout to pay{" "}
+                  <span className="font-semibold text-foreground">{formatMoney(d.amount, d.currency)}</span>.
+                  Your wallet credits automatically once the provider confirms.
+                </p>
+                <div className="mt-6 flex flex-wrap gap-2">
+                  <Button asChild>
+                    <a href={d.checkoutUrl} target="_blank" rel="noopener noreferrer">
+                      Continue to payment
+                    </a>
+                  </Button>
+                  <Button variant="outline" onClick={() => deposit.refetch()}>
+                    I&apos;ve paid — check status
+                  </Button>
+                  <Button variant="ghost" asChild>
+                    <Link href="/wallet">Back to wallet</Link>
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                {d?.transferInstructions ? (
+                  <TransferInstructions
+                    instructions={d.transferInstructions}
+                    amount={d.amount}
+                    currency={d.currency}
+                  />
+                ) : null}
+                <p className="mt-4 text-sm text-muted-foreground">
+                  Use only a bank account in your name. Your wallet updates after confirmation.
+                </p>
+                <div className="mt-6 flex flex-wrap gap-2">
+                  <Button variant="outline" onClick={() => toast.success("Thanks — we'll confirm within minutes")}>
+                    I&apos;ve sent it
+                  </Button>
+                  <Button variant="ghost" asChild>
+                    <Link href="/wallet">Back to wallet</Link>
+                  </Button>
+                </div>
+              </>
+            )}
           </>
         ) : null}
 

@@ -9,6 +9,7 @@
 import type {
   DashboardSummary,
   DepositIntent,
+  DepositOptions,
   Investment,
   InvestmentQuote,
   InvestmentSubmission,
@@ -295,6 +296,17 @@ export function createMockDataSource(options: MockDataSourceOptions = {}): Inves
     }),
     getTransaction: (id) => respond("getTransaction", () => clone(state.transactions.find((t) => t.id === id) ?? null)),
 
+    getDepositOptions: () => respond("getDepositOptions", () =>
+      clone<DepositOptions>({
+        currency: "NGN",
+        minDeposit: state.wallet.policies.minDeposit,
+        maxDeposit: null,
+        expiryMinutes: null,
+        providers: [
+          { id: "PAYSTACK", enabled: true },
+          { id: "KORAPAY", enabled: true },
+        ],
+      })),
     createDeposit: (input) => respond("createDeposit", () => {
       const existing = deposits.get(input.idempotencyKey);
       if (existing) return clone(existing);

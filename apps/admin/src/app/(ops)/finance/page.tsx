@@ -64,6 +64,7 @@ function FinanceOverview() {
                 </div>
               </div>
               <div className="mt-4 flex flex-col gap-1.5 text-xs font-semibold">
+                <Link href="/finance/payments" className="text-primary hover:underline">Payment infrastructure →</Link>
                 <Link href="/finance/deposits" className="text-primary hover:underline">Deposits →</Link>
                 <Link href="/finance/withdrawals" className="text-primary hover:underline">Withdrawal review queue →</Link>
                 <Link href="/finance/transactions" className="text-primary hover:underline">All transactions →</Link>

@@ -192,6 +192,12 @@ export function useWithdrawals() {
   return useQuery({ queryKey: key("withdrawals"), queryFn: () => ds.listWithdrawals() });
 }
 
+export function useDepositOptions() {
+  const ds = useDataSource();
+  const key = useKey();
+  return useQuery({ queryKey: key("depositOptions"), queryFn: () => ds.getDepositOptions() });
+}
+
 export function useCreateDeposit() {
   const ds = useDataSource();
   const qc = useQueryClient();
