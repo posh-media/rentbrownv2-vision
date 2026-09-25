@@ -41,8 +41,10 @@ rewards, notifications, policies, audit logs — schema + RLS + adapter swap-ins
 for the domain halves of `InvestorDataSource`/`AdminDataSource`. Exact order
 finalised during Phase 2 review.
 
-Phase 3A (schema architecture & review): `docs/phases/PHASE_3A_SCHEMA_PROPOSAL.md`
-— pending approval; no domain tables implemented yet.
+Phase 3A (schema architecture): `docs/phases/PHASE_3A_SCHEMA_PROPOSAL.md` —
+approved. Phase 3B (schema implementation): `0002–0004` migrations +
+84-check verifier, locally verified; hosted apply blocked on stale DB
+credentials. See `docs/phases/PHASE_3B_IMPLEMENTATION_REPORT.md`.
 
 ## PHASE 4 — Ledger + Wallet
 

@@ -51,3 +51,21 @@ Concretely:
 
 Status: accepted · Scope: `packages/supabase`, `supabase/migrations`, env
 architecture, auth surfaces on web/mobile/admin.
+
+## D-003 Canonical investment duration = hours; admin config = typed registry (2026-09)
+
+Two Phase 3 decisions, locked by the Phase 3A proposal and implemented in 3B:
+
+1. **Duration is stored as `duration_hours` (integer, elapsed-time semantics).**
+   Admins author durations in hours (24 → 1 day, 8760 → 1 year); UI derives
+   friendly labels. Maturity will be `activated_at + duration_hours * interval '1 hour'`
+   — immune to DST/month-length drift. Calendar-tenor products (same-day-of-month)
+   are out of scope; they would need a separate `tenor_months` column later.
+2. **Business configuration lives in `admin_config`, a typed key registry** —
+   `key + value_type + jsonb value + currency`, not a wide settings table. New
+   policy values ship without migrations. Writes go exclusively through
+   `set_admin_config()` (SUPER_ADMIN): validate → update → `admin_config_history`
+   → `audit_log`, atomically. Reads via `get_admin_config()`. Historical records
+   never depend on live config (investments carry snapshots).
+
+Status: accepted · Scope: `supabase/migrations/0002–0004`, Phase 4+ engines.

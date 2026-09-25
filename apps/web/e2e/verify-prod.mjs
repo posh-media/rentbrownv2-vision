@@ -43,7 +43,7 @@ for (const suite of SUITES) {
     });
     if (width === 1440) {
       for (const route of suite.routes) {
-        const res = await page.goto(`${suite.base}${route}`, { waitUntil: "networkidle", timeout: 30000 }).catch((e) => null);
+        const res = await page.goto(`${suite.base}${route}`, { waitUntil: "networkidle", timeout: 30000 }).catch(() => null);
         const status = res?.status() ?? "NAV-ERR";
         const title = await page.title();
         console.log(`  ${route.padEnd(42)} ${status}  "${title.slice(0, 60)}"`);
