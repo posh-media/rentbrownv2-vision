@@ -205,6 +205,19 @@ export function createSupabaseAdminDataSource(
       return { ok: true, auditId: input.idempotencyKey, message: `Investment moved to ${input.to.toLowerCase()}.` };
     },
 
+    async retrySettlement(input) {
+      if (!(await hasSession())) return domain.retrySettlement(input);
+      const { data, error } = await client.rpc("admin_retry_settlement", {
+        p_investment_id: input.investmentId,
+        p_reason: input.reason ?? "Settlement retry",
+        p_request_id: input.idempotencyKey,
+      });
+      if (error) return { ok: false, auditId: "", message: error.message };
+      const status = (data as { status?: string } | null)?.status;
+      return { ok: status === "COMPLETED", auditId: input.idempotencyKey,
+        message: status === "COMPLETED" ? "Settlement completed." : `Retry finished — status ${status}.` };
+    },
+
     async reconcileInvestments(): Promise<InvestmentReconciliationItem[]> {
       if (!(await hasSession())) return domain.reconcileInvestments();
       const { data, error } = await client.rpc("reconcile_investments");

@@ -11,6 +11,7 @@ import {
   useAdminInvestment,
   useMarkInvestmentReview,
   useResolveInvestmentReview,
+  useRetrySettlement,
 } from "../../../../lib/data/hooks";
 import { usePermissions } from "../../../../lib/data/provider";
 import { DetailRow } from "../../../../components/detail-drawer";
@@ -48,7 +49,7 @@ function timelineFor(i: NonNullable<ReturnType<typeof useAdminInvestment>["data"
   return items;
 }
 
-const RESOLVE_OPTIONS: InvestmentStatus[] = ["ACTIVE", "FAILED", "REFUNDED"];
+const RESOLVE_OPTIONS: InvestmentStatus[] = ["ACTIVE", "SETTLING", "FAILED", "REFUNDED"];
 
 function ReviewActions({ investment }: { investment: NonNullable<ReturnType<typeof useAdminInvestment>["data"]> }) {
   const { has } = usePermissions();
@@ -56,7 +57,8 @@ function ReviewActions({ investment }: { investment: NonNullable<ReturnType<type
   const [resolveTo, setResolveTo] = React.useState<InvestmentStatus>("ACTIVE");
   const mark = useMarkInvestmentReview();
   const resolve = useResolveInvestmentReview();
-  const pending = mark.isPending || resolve.isPending;
+  const retry = useRetrySettlement();
+  const pending = mark.isPending || resolve.isPending || retry.isPending;
 
   if (!has("finance.reconcile")) return null;
 
@@ -108,6 +110,16 @@ function ReviewActions({ investment }: { investment: NonNullable<ReturnType<type
             Mark for review
           </Button>
         )}
+        {["MATURITY_DUE", "SETTLING"].includes(investment.status) ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pending || !reason.trim()}
+            onClick={() => act(() => retry.mutateAsync({ investmentId: investment.id, reason: reason.trim(), idempotencyKey: idempotencyKey() }))}
+          >
+            Retry settlement
+          </Button>
+        ) : null}
       </div>
     </section>
   );

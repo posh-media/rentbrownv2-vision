@@ -387,7 +387,7 @@ check("investor gets nothing from admin RPC", r.rows.length === 0);
 
 // ── admin_config: seeds, validation, history, audit ──────────────────────────
 r = await admin.query("select count(*)::int c from public.admin_config");
-check("admin_config seeded (10 phase-3 + 16 payment keys)", r.rows[0].c === 26, `found ${r.rows[0].c}`);
+check("admin_config seeded (10 phase-3 + 16 payment + 3 maturity keys)", r.rows[0].c === 29, `found ${r.rows[0].c}`);
 r = await admin.query("select value from public.admin_config where key='referral.signup_reward_minor'");
 check("signup reward seeded = 150000", r.rows[0].value === 150000, r.rows[0].value);
 r = await admin.query("select value from public.admin_config where key='platform.supported_currencies'");
@@ -1382,12 +1382,249 @@ r = await admin.query("select count(*)::int c from public.reconcile_wallets()");
 check("wallet reconciliation clean", r.rows[0].c === 0, `diffs=${r.rows[0].c}`);
 r = await admin.query("select check_name, count(*)::int c from public.reconcile_investments() group by 1");
 check("investment reconciliation clean", r.rows.length === 0, JSON.stringify(r.rows));
+
 await expectErr("investor cannot reconcile", () =>
   asUserSession(uid7, () => admin.query(`select * from public.reconcile_investments()`)), "not authorized");
 // seed rows themselves produce no anomalies
 r = await admin.query(`select count(*)::int c from public.reconcile_investments() where entity_id in
   (select id::text from public.investment_rounds where seed_tag='p6-catalogue-fixtures')`);
 check("seed rounds anomaly-free", r.rows[0].c === 0);
+
+// ═══════════════════════════════════════════════════════════════════════════
+
+console.log("── Phase 7: maturity config + detection ───────");
+
+r = await admin.query(`select key, value from public.admin_config
+  where key like 'investment.maturity.%' order by 1`);
+check("maturity config seeded", r.rows.length === 3
+  && r.rows.find((x) => x.key === "investment.maturity.batch_limit")?.value === 25
+  && r.rows.find((x) => x.key === "investment.maturity.enabled")?.value === true
+  && r.rows.find((x) => x.key === "investment.maturity.stale_minutes")?.value === 15,
+  JSON.stringify(r.rows));
+
+// not-yet-due investment is never marked
+let marked = first(await asService(() => admin.query(
+  "select public.mark_due_investments(100, 'req-p7') n"))).n;
+r = await admin.query("select status from public.investments where id=$1", [inv.id]);
+check("future-dated ACTIVE stays ACTIVE", r.rows[0].status === "ACTIVE" && marked === 0);
+
+// backdate a fresh investment past maturity (flagged write — fixture only)
+let invM = first(await asUserSession(uid6, () => admin.query(
+  `select * from public.request_investment($1, 1, 'inv-mature', 'WALLET')`, [terraces.id])));
+await investWrite("update public.investments set matures_at = now() - interval '2 hours' where id=$1", [invM.id]);
+
+marked = first(await asService(() => admin.query(
+  "select public.mark_due_investments(100, 'req-p7') n"))).n;
+check("due investment marked", marked === 1, `marked=${marked}`);
+r = await admin.query("select status from public.investments where id=$1", [invM.id]);
+check("status MATURITY_DUE", r.rows[0].status === "MATURITY_DUE");
+r = await admin.query(`select event_type from public.investment_events
+  where investment_id=$1 order by created_at`, [invM.id]);
+check("MATURED event appended", r.rows.at(-1).event_type === "MATURED");
+r = await admin.query(`select event_type from public.outbound_events
+  where aggregate_id=$1 and event_type='investment.matured'`, [invM.id]);
+check("investment.matured outbox written", r.rows.length === 1);
+
+// batch limit + ordering
+let invM2 = first(await asUserSession(uid7, () => admin.query(
+  `select * from public.request_investment($1, 1, 'inv-mature-2', 'WALLET')`, [terraces.id])));
+await investWrite("update public.investments set matures_at = now() - interval '1 hour' where id=$1", [invM2.id]);
+r = await asService(() => admin.query("select * from public.claim_due_investments(1)"));
+check("claim respects batch limit", r.rows.length === 1);
+check("claim orders matures_at ASC", r.rows[0].claim_due_investments === invM.id);
+
+console.log("── Phase 7: settlement ────────────────────────");
+
+// exact arithmetic fixture: 1 terraces slot = ₦100,000 @16.5% → ₦16,500 / ₦116,500
+const walBefore = (await admin.query(
+  "select available_minor::bigint a from public.wallets where user_id=$1 and currency='NGN'", [uid6])).rows[0].a;
+let invS = first(await asService(() => admin.query(
+  "select * from public.settle_investment($1, 'req-settle-1')", [invM.id])));
+check("settlement COMPLETED", invS.status === "COMPLETED" && !!invS.completed_at);
+r = await admin.query("select available_minor::bigint a from public.wallets where user_id=$1 and currency='NGN'", [uid6]);
+check("wallet credited maturity ₦116,500", BigInt(r.rows[0].a) - BigInt(walBefore) === 11650000n,
+  `delta=${BigInt(r.rows[0].a) - BigInt(walBefore)}`);
+r = await admin.query(`select e.direction, e.amount_minor::bigint amt, a.key, j.journal_type
+  from public.ledger_entries e
+  join public.ledger_accounts a on a.id=e.account_id
+  join public.journal_entries j on j.id=e.journal_id
+  where j.idempotency_key=$1 order by e.id`, [`inv:mature:${invM.id}`]);
+check("MATURITY_CREDIT legs exact (₦100k principal / ₦16.5k profit / ₦116.5k credit)",
+  r.rows.length === 3
+  && r.rows[0].key === "system:investment_principal_payable:NGN" && r.rows[0].direction === "DEBIT" && r.rows[0].amt === "10000000"
+  && r.rows[1].key === "system:investment_profit_payable:NGN" && r.rows[1].direction === "DEBIT" && r.rows[1].amt === "1650000"
+  && r.rows[2].key === `user:${uid6}:available:NGN` && r.rows[2].direction === "CREDIT" && r.rows[2].amt === "11650000",
+  JSON.stringify(r.rows));
+r = await admin.query(`select event_type from public.investment_events
+  where investment_id=$1 order by created_at`, [invM.id]);
+check("event order MATURED→SETTLEMENT_STARTED→SETTLED",
+  r.rows.map((x) => x.event_type).join(",").endsWith("MATURED,SETTLEMENT_STARTED,SETTLED"));
+r = await admin.query(`select event_type from public.outbound_events
+  where aggregate_id=$1 and event_type='investment.settled'`, [invM.id]);
+check("investment.settled outbox written", r.rows.length === 1);
+
+// payable netting: principal payable balance == outstanding open principal
+r = await admin.query(`select check_name from public.reconcile_investments() where check_name='principal_payable_drift'`);
+check("principal payable nets against open investments", r.rows.length === 0, JSON.stringify(r.rows));
+
+console.log("── Phase 7: idempotency + concurrency ─────────");
+
+invS = first(await asService(() => admin.query(
+  "select * from public.settle_investment($1, 'req-settle-2')", [invM.id])));
+check("second settle is a no-op", invS.status === "COMPLETED");
+r = await admin.query("select count(*)::int c from public.journal_entries where idempotency_key=$1", [`inv:mature:${invM.id}`]);
+check("still exactly one settlement journal", r.rows[0].c === 1);
+r = await admin.query(`select count(*)::int c from public.investment_events where investment_id=$1 and event_type='SETTLED'`, [invM.id]);
+check("no duplicate SETTLED event", r.rows[0].c === 1);
+r = await admin.query("select count(*)::int c from public.outbound_events where aggregate_id=$1 and event_type='investment.settled'", [invM.id]);
+check("no duplicate settled outbox", r.rows[0].c === 1);
+
+// concurrent settle attempts on the same investment — exactly one settlement
+await asService(() => admin.query(`select public.mark_due_investments(100)`));
+const c5 = new pg.Client({ host: "127.0.0.1", port: 55432, user: "postgres", password: "postgres", database: "verify" });
+await c5.connect();
+const settleAs = async (client) => {
+  await client.query("set role service_role");
+  try { return await client.query("select * from public.settle_investment($1)", [invM2.id]); }
+  finally { await client.query("reset role"); }
+};
+const [sa, sb2] = await Promise.allSettled([settleAs(admin), settleAs(c5)]);
+check("concurrent settle: both exit safely",
+  sa.status === "fulfilled" && sb2.status === "fulfilled",
+  `${sa.status === "rejected" ? sa.reason.message : "ok"} / ${sb2.status === "rejected" ? sb2.reason.message : "ok"}`);
+r = await admin.query("select status from public.investments where id=$1", [invM2.id]);
+check("concurrent settle: COMPLETED once", r.rows[0].status === "COMPLETED");
+r = await admin.query("select count(*)::int c from public.journal_entries where idempotency_key=$1", [`inv:mature:${invM2.id}`]);
+check("concurrent settle: one journal", r.rows[0].c === 1);
+await c5.end();
+
+console.log("── Phase 7: stale SETTLING recovery ───────────");
+
+// stale_minutes → 0 so any SETTLING row is immediately reclaimable
+await asUserSession(uid3, () => admin.query(
+  `select public.set_admin_config('investment.maturity.stale_minutes', '0', 'p7 test', 'req-p7-cfg')`));
+
+// case 1: stale SETTLING with no journal → normal settlement path
+let invT1 = first(await asUserSession(uid6, () => admin.query(
+  `select * from public.request_investment($1, 1, 'inv-stale-1', 'WALLET')`, [terraces.id])));
+await investWrite("update public.investments set matures_at = now() - interval '1 hour' where id=$1", [invT1.id]);
+await asService(() => admin.query("select public.mark_due_investments(100)"));
+await asService(() => admin.query(
+  `select public.apply_investment_transition($1,'SETTLING','SYSTEM')`, [invT1.id]));
+r = await asService(() => admin.query("select * from public.claim_due_investments(25)"));
+check("stale SETTLING is reclaimable", r.rows.some((x) => x.claim_due_investments === invT1.id));
+invT1 = first(await asService(() => admin.query("select * from public.settle_investment($1)", [invT1.id])));
+check("stale SETTLING (no journal) settles", invT1.status === "COMPLETED");
+r = await admin.query("select count(*)::int c from public.journal_entries where idempotency_key=$1", [`inv:mature:${invT1.id}`]);
+check("one settlement journal", r.rows[0].c === 1);
+
+// case 2: stale SETTLING with a matching journal → repair, no re-post
+let invT2 = first(await asUserSession(uid6, () => admin.query(
+  `select * from public.request_investment($1, 1, 'inv-stale-2', 'WALLET')`, [terraces.id])));
+await investWrite("update public.investments set matures_at = now() - interval '1 hour' where id=$1", [invT2.id]);
+await asService(() => admin.query("select public.mark_due_investments(100)"));
+await asService(() => admin.query(
+  `select public.apply_investment_transition($1,'SETTLING','SYSTEM')`, [invT2.id]));
+const walT2 = (await admin.query(
+  "select available_minor::bigint a from public.wallets where user_id=$1 and currency='NGN'", [uid6])).rows[0].a;
+await asService(() => admin.query(`select public.post_journal('MATURITY_CREDIT','NGN',
+  jsonb_build_array(
+    jsonb_build_object('account_key','system:investment_principal_payable','direction','DEBIT','amount_minor',$1::bigint),
+    jsonb_build_object('account_key','system:investment_profit_payable','direction','DEBIT','amount_minor',$2::bigint),
+    jsonb_build_object('account_key','user:${uid6}:available','direction','CREDIT','amount_minor',$3::bigint)),
+  null,$4,'investment',$5,'SYSTEM',$6,null,'repair test')`,
+  [invT2.principal_minor, invT2.expected_profit_minor, invT2.maturity_value_minor,
+   `inv:mature:${invT2.id}`, invT2.id, uid6]));
+invT2 = first(await asService(() => admin.query("select * from public.settle_investment($1)", [invT2.id])));
+check("stale SETTLING + journal repaired to COMPLETED", invT2.status === "COMPLETED");
+r = await admin.query("select count(*)::int c from public.journal_entries where idempotency_key=$1", [`inv:mature:${invT2.id}`]);
+check("existing journal preserved — no re-post", r.rows[0].c === 1);
+r = await admin.query("select available_minor::bigint a from public.wallets where user_id=$1 and currency='NGN'", [uid6]);
+check("wallet credited exactly once", BigInt(r.rows[0].a) - BigInt(walT2) === 11650000n);
+r = await admin.query(`select metadata->>'note' note from public.investment_events
+  where investment_id=$1 and event_type='SETTLED'`, [invT2.id]);
+check("repair event cites existing journal", (r.rows[0]?.note ?? "").includes("existing journal"));
+
+// case 3: stale SETTLING with a mismatched journal → REVIEW + settlement_review
+let invT3 = first(await asUserSession(uid6, () => admin.query(
+  `select * from public.request_investment($1, 1, 'inv-stale-3', 'WALLET')`, [terraces.id])));
+await investWrite("update public.investments set matures_at = now() - interval '1 hour' where id=$1", [invT3.id]);
+await asService(() => admin.query("select public.mark_due_investments(100)"));
+await asService(() => admin.query(
+  `select public.apply_investment_transition($1,'SETTLING','SYSTEM')`, [invT3.id]));
+await asService(() => admin.query(`select public.post_journal('MATURITY_CREDIT','NGN',
+  jsonb_build_array(
+    jsonb_build_object('account_key','system:investment_principal_payable','direction','DEBIT','amount_minor',$1::bigint),
+    jsonb_build_object('account_key','system:investment_profit_payable','direction','DEBIT','amount_minor',$2::bigint - 1),
+    jsonb_build_object('account_key','user:${uid6}:available','direction','CREDIT','amount_minor',$3::bigint - 1)),
+  null,$4,'investment',$5,'SYSTEM',$6,null,'mismatched leg test')`,
+  [invT3.principal_minor, invT3.expected_profit_minor, invT3.maturity_value_minor,
+   `inv:mature:${invT3.id}`, invT3.id, uid6]));
+invT3 = first(await asService(() => admin.query("select * from public.settle_investment($1)", [invT3.id])));
+check("mismatched journal → REVIEW_REQUIRED", invT3.status === "REVIEW_REQUIRED");
+r = await admin.query("select count(*)::int c from public.journal_entries where entity_id=$1 and journal_type='MATURITY_CREDIT'", [invT3.id]);
+check("no second settlement journal on mismatch", r.rows[0].c === 1);
+r = await admin.query(`select count(*)::int c from public.outbound_events
+  where aggregate_id=$1 and event_type='investment.settlement_review'`, [invT3.id]);
+check("investment.settlement_review outbox written", r.rows[0].c === 1);
+
+await asUserSession(uid3, () => admin.query(
+  `select public.set_admin_config('investment.maturity.stale_minutes', '15', 'p7 restore', 'req-p7-cfg2')`));
+
+console.log("── Phase 7: admin ops + privileges ────────────");
+
+await expectErr("investor cannot settle", () =>
+  asUserSession(uid7, () => admin.query(`select * from public.settle_investment('${inv.id}')`)), "denied");
+await expectErr("anon cannot mark due", () =>
+  asAnon("select public.mark_due_investments(10)"), "denied");
+await expectErr("anon cannot claim", () =>
+  asAnon("select * from public.claim_due_investments(10)"), "denied");
+await expectErr("investor cannot retry settlement", () =>
+  asUserSession(uid7, () => admin.query(
+    `select * from public.admin_retry_settlement('${inv.id}','x')`)), "not authorized");
+await expectErr("retry requires reason", () =>
+  asUserSession(uid1, () => admin.query(
+    `select * from public.admin_retry_settlement('${inv.id}',' ')`)), "reason");
+await expectErr("settle rejects non-due investment", () =>
+  asService(() => admin.query(`select * from public.settle_investment('${inv.id}')`)), "ERR_INVESTMENT_NOT_SETTLABLE");
+
+// admin retry path: resolve review → SETTLING → audited retry settles
+await asUserSession(uid1, () => admin.query(
+  `select public.admin_resolve_investment_review('${invT3.id}','SETTLING','manual settlement review','req-rev')`));
+let invT3r = first(await asUserSession(uid1, () => admin.query(
+  `select * from public.admin_retry_settlement('${invT3.id}','retry after review')`)));
+check("retry re-escalates mismatched journal to REVIEW", invT3r.status === "REVIEW_REQUIRED");
+r = await admin.query(`select count(*)::int c from public.audit_log
+  where entity_id=$1 and action='SETTLEMENT_RETRY'`, [invT3.id]);
+check("retry audited", r.rows[0].c === 1);
+
+console.log("── Phase 7: reconciliation checks ─────────────");
+
+r = await admin.query(`select check_name from public.reconcile_investments()
+  where entity_id=$1`, [invT3.id]);
+check("maturity_amount_mismatch detected", r.rows.some((x) => x.check_name === "maturity_amount_mismatch"),
+  JSON.stringify(r.rows));
+
+// overdue_active detection on a deliberately-unmarked due investment
+let invO = first(await asUserSession(uid6, () => admin.query(
+  `select * from public.request_investment($1, 1, 'inv-overdue', 'WALLET')`, [terraces.id])));
+await investWrite("update public.investments set matures_at = now() - interval '2 hours' where id=$1", [invO.id]);
+r = await admin.query(`select check_name from public.reconcile_investments()
+  where entity_id=$1 and check_name='overdue_active'`, [invO.id]);
+check("overdue_active detected", r.rows.length === 1);
+await asService(() => admin.query("select public.mark_due_investments(100)"));
+await asService(() => admin.query("select * from public.settle_investment($1)", [invO.id]));
+r = await admin.query(`select check_name from public.reconcile_investments()
+  where entity_id=$1`, [invO.id]);
+check("overdue investment settles clean", r.rows.length === 0);
+
+// final sweep — only the intentionally-mismatched anomaly remains
+r = await admin.query("select check_name, entity_id from public.reconcile_investments()");
+check("reconciliation: only the intentional mismatch remains",
+  r.rows.length === 1 && r.rows[0].check_name === "maturity_amount_mismatch" && r.rows[0].entity_id === invT3.id,
+  JSON.stringify(r.rows));
+r = await admin.query("select count(*)::int c from public.reconcile_wallets()");
+check("wallet reconciliation still clean", r.rows[0].c === 0);
 
 // ── migration tracking convention untouched ──────────────────────────────────
 r = await admin.query(`select count(*)::int c from information_schema.tables

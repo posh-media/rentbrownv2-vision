@@ -443,6 +443,23 @@ export function createMockAdminDataSource(options: MockAdminDataSourceOptions = 
         return { ok: true, auditId, message: `${i.reference} moved to ${input.to.toLowerCase()}.` };
       }),
 
+    retrySettlement: (input) =>
+      respond(() => {
+        requireIdempotency(input);
+        const i = store.investments.find((x) => x.id === input.investmentId);
+        if (!i) return { ok: false, auditId: "", message: "Investment not found." } satisfies AdminActionResult;
+        if (!["MATURITY_DUE", "SETTLING"].includes(i.status))
+          return { ok: false, auditId: "", message: "Investment is not settleable." };
+        i.status = "COMPLETED";
+        i.settledAt = new Date().toISOString();
+        const auditId = recordAudit(
+          "investment.settlement_retry",
+          { type: "investment", id: i.id, label: i.reference },
+          `${actor.displayName} retried settlement for ${i.reference}. Reason: ${input.reason}`,
+        );
+        return { ok: true, auditId, message: `${i.reference} settlement completed.` };
+      }),
+
     reconcileInvestments: () => respond(() => []),
 
     getLedgerOverview: () =>

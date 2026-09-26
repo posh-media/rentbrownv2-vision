@@ -144,6 +144,15 @@ export function useResolveInvestmentReview() {
   });
 }
 
+export function useRetrySettlement() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: AdminActionInput & { investmentId: string }) => ds.retrySettlement(input),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
 export function useInvestmentReconciliation(enabled: boolean) {
   const ds = useDataSource();
   const key = useKey();

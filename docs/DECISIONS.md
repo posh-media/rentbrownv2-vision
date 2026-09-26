@@ -139,3 +139,48 @@ rejection inside `post_journal`.
 Status: accepted · implemented in Phase 6B — see
 docs/phases/PHASE_6B_IMPLEMENTATION_REPORT.md · Scope: `0012–0015`,
 investor/admin DataSources, admin investments UI.
+
+## D-007 Investment maturity engine (APPROVED — Phase 7A, implemented in 7B)
+
+Phase 7A proposal: docs/phases/PHASE_7A_MATURITY_ENGINE_ARCHITECTURE.md.
+Approved D-7.1–D-7.15:
+
+- **D-7.1** Detection: scheduled `maturity-worker` Edge Function →
+  `mark_due_investments` RPC; `matures_at <= now()` (database time) is
+  authoritative; existing `investments_maturity_idx` bounds the scan.
+- **D-7.2** Claim: conditional `UPDATE … WHERE status='MATURITY_DUE'` inside
+  `settle_investment` + `FOR UPDATE SKIP LOCKED` batch claim.
+- **D-7.3** One `MATURITY_CREDIT` journal, three lines:
+  DR principal_payable + DR profit_payable → CR user available.
+- **D-7.4** Existing `INVESTMENT_PRINCIPAL_PAYABLE` / `INVESTMENT_PROFIT_PAYABLE`
+  system accounts; no new accounts or journal types.
+- **D-7.5** Idempotency: claim-on-status + journal key `inv:mature:<id>` +
+  transition no-ops + same-transaction events.
+- **D-7.6** Settlement is a single transaction — partial settlement is
+  impossible; any failure rolls back to a retryable state.
+- **D-7.7** Transient failures auto-retry; REVIEW_REQUIRED only for genuine
+  anomalies (admin action or reconciliation findings).
+- **D-7.8** Batch 25 (config), 5-minute cadence, bounded worker runtime,
+  `matures_at ASC` ordering.
+- **D-7.9** Stale-SETTLING recovery (15 min) is **journal-aware**: if
+  `inv:mature:<id>` journal exists, never re-post — repair state via governed
+  transitions (or escalate to REVIEW on leg mismatch); if absent, the normal
+  settlement path applies.
+- **D-7.10** Eleven maturity reconciliation checks on `reconcile_investments`;
+  read-only, never self-correcting.
+- **D-7.11** `admin_retry_settlement` (FINANCE_ADMIN/SUPER_ADMIN, audited)
+  uses the same settle path; journal corrections use existing
+  `reverse_journal`.
+- **D-7.12** Durable `outbound_events` (`investment.matured`,
+  `investment.settled`, `investment.settlement_review`) in-transaction;
+  in-app notifications remain Phase 10.
+- **D-7.13** Settlement credits the wallet regardless of account_status —
+  owed funds are never trapped; withdrawal stays a separate gate.
+- **D-7.14** Currency-generic via `investment.currency`; effectively NGN-only
+  (Phase 6 issues NGN investments); no FX.
+- **D-7.15** `0016` + `0017` migrations + `maturity-worker`; no new tables,
+  enums, journal types, or system accounts.
+
+Status: accepted · implemented in Phase 7B — see
+docs/phases/PHASE_7B_IMPLEMENTATION_REPORT.md · Scope: `0016–0017`,
+`maturity-worker` Edge Function, reconciliation + admin extensions.

@@ -759,6 +759,8 @@ export interface AdminDataSource {
   markInvestmentReview(input: AdminActionInput & { investmentId: string }): Promise<AdminActionResult>;
   /** Audited REVIEW_REQUIRED → resolved status; the server transition map governs. */
   resolveInvestmentReview(input: AdminActionInput & { investmentId: string; to: InvestmentStatus }): Promise<AdminActionResult>;
+  /** Audited settlement retry for MATURITY_DUE / stale SETTLING rows (finance roles). Same settle path as the worker. */
+  retrySettlement(input: AdminActionInput & { investmentId: string }): Promise<AdminActionResult>;
   /** Detection-only integrity check: journals, capacity counters, idempotency. */
   reconcileInvestments(): Promise<InvestmentReconciliationItem[]>;
 
