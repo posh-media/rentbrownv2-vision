@@ -106,3 +106,36 @@ provider seam for a future international provider.
 Status: accepted · implemented in Phase 5B — see
 docs/phases/PHASE_5B_IMPLEMENTATION_REPORT.md · Scope: `0008–0011`,
 Edge Functions (init + 2 webhooks + outbox worker), admin payment overview.
+
+## D-006 Investment engine (IMPLEMENTED — Phase 6B)
+
+Phase 6A proposal: docs/phases/PHASE_6A_INVESTMENT_ENGINE_ARCHITECTURE.md.
+Approved D-6.1–D-6.7:
+
+- **D-6.1** Wallet-funded only. `funding_source = WALLET`; BANK_TRANSFER/CARD
+  stay in the enum but `request_investment` rejects them with
+  `ERR_FUNDING_SOURCE`.
+- **D-6.2** Immediate activation. `activated_at = now()`,
+  `matures_at = activated_at + duration_hours`; the investment is `ACTIVE` on
+  commit. Round `projected_*` fields are display-only.
+- **D-6.3** `seed_tag` provenance (not `is_test`). Catalogue fixtures carry
+  `'p6-catalogue-fixtures'` on properties/plans/rounds; `NULL` = genuine data.
+- **D-6.4** `investment_fee_bps = 0` enforced at purchase; a future non-zero
+  fee plan rejects with a typed error rather than mis-posting.
+- **D-6.5** `NEARING_CAPACITY` is a display concept; authoritative capacity is
+  `allocated_slots`/`reserved_slots`/`total_slots` + the capacity invariant.
+- **D-6.6** Dashboard composed from existing real reads; no dedicated
+  aggregation RPC (evaluated during implementation — composition sufficed).
+- **D-6.7** `request_investment` returns the existing `InvestmentSubmission`
+  wire shape; frontend contract unchanged.
+
+Consequences recorded during implementation: review-resolution needed its own
+audited admin RPC (`admin_resolve_investment_review`) because
+`apply_investment_transition` is service-only; `reconcile_investments`
+excludes seed-tagged rounds from capacity checks (fixture counters simulate
+history without investments); `0015` fixes a hosted-only pg-safeupdate
+rejection inside `post_journal`.
+
+Status: accepted · implemented in Phase 6B — see
+docs/phases/PHASE_6B_IMPLEMENTATION_REPORT.md · Scope: `0012–0015`,
+investor/admin DataSources, admin investments UI.

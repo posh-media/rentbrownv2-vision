@@ -445,12 +445,37 @@ export interface AdminInvestmentRow {
   activatedAt: ISODateString | null;
   maturesAt: ISODateString | null;
   settledAt: ISODateString | null;
+  /** Phase 6B extras — present when the real detail RPC provides them. */
+  paymentReference?: string | null;
+  /** Catalogue provenance marker, e.g. "p6-catalogue-fixtures" for test data. */
+  seedTag?: string | null;
+  /** Append-only lifecycle events for the detail timeline. */
+  events?: AdminInvestmentEvent[];
+  /** Funding journals linked to this position (HOLD, INVESTMENT_DEBIT…). */
+  journals?: Array<{ reference: string; journalType: string; createdAt: ISODateString }>;
+}
+
+export interface AdminInvestmentEvent {
+  id: string;
+  type: string;
+  label: string;
+  at: ISODateString;
+  actor: "INVESTOR" | "ADMIN" | "SYSTEM";
+  note?: string;
 }
 
 export interface InvestmentAdminFilter extends PageRequest {
   status?: InvestmentStatus[];
   propertyId?: string;
   userId?: string;
+}
+
+/** One anomaly row from reconcile_investments() — detection only. */
+export interface InvestmentReconciliationItem {
+  checkName: string;
+  entityType: string;
+  entityId: string;
+  detail: string;
 }
 
 // ── Financial operations (display only) ──────────────────────────────────────
@@ -730,6 +755,12 @@ export interface AdminDataSource {
 
   listInvestments(filter?: InvestmentAdminFilter): Promise<Page<AdminInvestmentRow>>;
   getInvestment(id: string): Promise<AdminInvestmentRow | null>;
+  /** Audited ACTIVE → REVIEW_REQUIRED (finance roles only). */
+  markInvestmentReview(input: AdminActionInput & { investmentId: string }): Promise<AdminActionResult>;
+  /** Audited REVIEW_REQUIRED → resolved status; the server transition map governs. */
+  resolveInvestmentReview(input: AdminActionInput & { investmentId: string; to: InvestmentStatus }): Promise<AdminActionResult>;
+  /** Detection-only integrity check: journals, capacity counters, idempotency. */
+  reconcileInvestments(): Promise<InvestmentReconciliationItem[]>;
 
   getLedgerOverview(): Promise<LedgerOverview>;
   listDeposits(filter?: FinanceFilter): Promise<Page<AdminDepositRow>>;

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AdminActor, AdminDataSource, AdminRole, AuthGateway, Permission } from "@rentbrown/types";
 import { createMockAdminDataSource } from "@rentbrown/mock-data";
-import { createAuthGateway, resolveAdminActor, type SupabaseClient } from "@rentbrown/supabase";
+import { createAuthGateway, createSupabaseAdminDataSource, resolveAdminActor, type SupabaseClient } from "@rentbrown/supabase";
 
 import { getSupabaseBrowserClient } from "../supabase/client";
 
@@ -113,9 +113,13 @@ function AdminSession({ children }: { children: React.ReactNode }) {
 
   const role: AdminRole = mode === "supabase" ? (actorQuery.data?.roles[0] ?? "SUPPORT") : demoRole;
 
-  // Domain reads stay mock in Phase 2 — only the actor/permissions are real.
-  // Phase 3+ swaps these for real adapters behind the same AdminDataSource seam.
-  const source = React.useMemo(() => createMockAdminDataSource({ role, latencyMs: 320 }), [role]);
+  // Actor/permissions are real in Supabase mode; the Phase 6B adapter layer
+  // routes the investments domain to the real RPCs while other domains keep
+  // delegating to the mock source until their phases land.
+  const source = React.useMemo(() => {
+    const mock = createMockAdminDataSource({ role, latencyMs: 320 });
+    return mode === "supabase" && client ? createSupabaseAdminDataSource(client, mock) : mock;
+  }, [mode, client, role]);
 
   const resolveActor = React.useCallback(async (): Promise<AdminActor | null> => {
     if (mode === "supabase") {

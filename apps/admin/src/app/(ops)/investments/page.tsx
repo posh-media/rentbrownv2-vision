@@ -6,7 +6,8 @@ import Link from "next/link";
 import type { AdminInvestmentRow, InvestmentStatus } from "@rentbrown/types";
 import { formatBps, formatDate, formatMoney } from "@rentbrown/utils";
 
-import { useAdminInvestments } from "../../../lib/data/hooks";
+import { useAdminInvestments, useInvestmentReconciliation } from "../../../lib/data/hooks";
+import { usePermissions } from "../../../lib/data/provider";
 import { ColumnDef, DataTable } from "../../../components/data-table";
 import { FilterBar, FilterSelect } from "../../../components/filter-bar";
 import { PageHeader } from "../../../components/page-header";
@@ -63,6 +64,29 @@ const columns: ColumnDef<AdminInvestmentRow>[] = [
   { id: "createdAt", header: "Created", sortable: true, cell: (i) => <span className="tabular text-xs">{formatDate(i.createdAt)}</span> },
 ];
 
+function ReconciliationStrip() {
+  const { has, ready } = usePermissions();
+  const recon = useInvestmentReconciliation(ready && has("finance.reconcile"));
+  if (!ready || !has("finance.reconcile") || !recon.data) return null;
+  const items = recon.data;
+  return (
+    <section className="financial-card mb-4 p-4">
+      <h2 className="eyebrow mb-1 text-muted-foreground">Investment reconciliation</h2>
+      {items.length === 0 ? (
+        <p className="text-xs text-[var(--success-fg)]">No anomalies — investments, journals and round counters agree.</p>
+      ) : (
+        <ul className="flex flex-col gap-1">
+          {items.map((a) => (
+            <li key={`${a.checkName}-${a.entityId}`} className="text-xs text-[var(--error-fg)]">
+              <span className="font-mono font-semibold">{a.checkName}</span> · {a.entityType} {a.entityId.slice(0, 8)} — {a.detail}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function InvestmentsList() {
   const router = useRouter();
   const [query, setQuery] = React.useState("");
@@ -80,6 +104,7 @@ function InvestmentsList() {
   return (
     <div>
       <PageHeader title="Investments" description="Every investment position across the platform — principal, expected profit and maturity kept separate." />
+      <ReconciliationStrip />
       <FilterBar query={query} onQueryChange={(v) => { setQuery(v); setPage(1); }} placeholder="Search reference, investor, property…">
         <FilterSelect
           label="Investment status"

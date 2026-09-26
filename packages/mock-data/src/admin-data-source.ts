@@ -415,6 +415,36 @@ export function createMockAdminDataSource(options: MockAdminDataSourceOptions = 
 
     getInvestment: (id: string) => respond(() => clone(store.investments.find((i) => i.id === id) ?? null)),
 
+    markInvestmentReview: (input) =>
+      respond(() => {
+        requireIdempotency(input);
+        const i = store.investments.find((x) => x.id === input.investmentId);
+        if (!i) return { ok: false, auditId: "", message: "Investment not found." } satisfies AdminActionResult;
+        i.status = "REVIEW_REQUIRED";
+        const auditId = recordAudit(
+          "investment.review",
+          { type: "investment", id: i.id, label: i.reference },
+          `${actor.displayName} marked ${i.reference} for review. Reason: ${input.reason}`,
+        );
+        return { ok: true, auditId, message: `${i.reference} is now under review.` };
+      }),
+
+    resolveInvestmentReview: (input) =>
+      respond(() => {
+        requireIdempotency(input);
+        const i = store.investments.find((x) => x.id === input.investmentId);
+        if (!i) return { ok: false, auditId: "", message: "Investment not found." } satisfies AdminActionResult;
+        i.status = input.to;
+        const auditId = recordAudit(
+          "investment.review_resolve",
+          { type: "investment", id: i.id, label: i.reference },
+          `${actor.displayName} resolved ${i.reference} → ${input.to}. Reason: ${input.reason}`,
+        );
+        return { ok: true, auditId, message: `${i.reference} moved to ${input.to.toLowerCase()}.` };
+      }),
+
+    reconcileInvestments: () => respond(() => []),
+
     getLedgerOverview: () =>
       respond(() => {
         const accountKeys = ["AVAILABLE", "RESERVED", "BONUS", "PENDING"] as const;

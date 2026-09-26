@@ -7,6 +7,7 @@ import type {
   AuditFilter,
   FinanceFilter,
   InvestmentAdminFilter,
+  InvestmentStatus,
   KycDecisionInput,
   KycFilter,
   PageRequest,
@@ -123,6 +124,30 @@ export function useAdminInvestment(id: string) {
   const ds = useDataSource();
   const key = useKey();
   return useQuery({ queryKey: key("investment", id), queryFn: () => ds.getInvestment(id) });
+}
+
+export function useMarkInvestmentReview() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: AdminActionInput & { investmentId: string }) => ds.markInvestmentReview(input),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useResolveInvestmentReview() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: AdminActionInput & { investmentId: string; to: InvestmentStatus }) => ds.resolveInvestmentReview(input),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useInvestmentReconciliation(enabled: boolean) {
+  const ds = useDataSource();
+  const key = useKey();
+  return useQuery({ queryKey: key("investment-reconciliation"), queryFn: () => ds.reconcileInvestments(), enabled });
 }
 
 export function useLedgerOverview() {

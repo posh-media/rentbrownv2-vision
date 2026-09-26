@@ -240,36 +240,54 @@ await admin.query(`insert into public.investment_plans (id, property_id, name, c
   values ($1,$2,'Income note','NGN',10000000,1650,8760,1,'PUBLISHED'),
          ($3,$2,'Draft plan','NGN',5000000,1400,4320,2,'DRAFT')`, [planPub, propPub, planDraft]);
 
+// Phase 6B write guards require app.investment_write for investments /
+// investment_events / investment_rounds writes. investWrite runs statements
+// inside a flagged transaction so fixtures and CHECK tests exercise the real
+// constraints rather than tripping the guard.
+const investWrite = async (sql, params = [], commit = true) => {
+  await admin.query("begin");
+  await admin.query("select set_config('app.investment_write','1',true)");
+  try {
+    const res = await admin.query(sql, params);
+    if (commit) await admin.query("commit"); else await admin.query("rollback");
+    return res;
+  } catch (e) {
+    await admin.query("rollback");
+    throw e;
+  }
+};
+
 const roundId = "ccccccc1-0000-0000-0000-000000000001";
-await admin.query(`insert into public.investment_rounds (id, plan_id, round_number, status, total_slots, slot_price_minor, currency, opens_at, closes_at)
+await investWrite(`insert into public.investment_rounds (id, plan_id, round_number, status, total_slots, slot_price_minor, currency, opens_at, closes_at)
   values ($1,$2,1,'OPEN',100,10000000,'NGN',now(),now()+interval '30 days')`, [roundId, planPub]);
 
 const invId = "ddddddd1-0000-0000-0000-000000000001";
-await admin.query(`insert into public.investments (id, reference, user_id, round_id, plan_id, property_id, funding_source, slots, slot_price_minor, currency, principal_minor, roi_bps, duration_hours, expected_profit_minor, maturity_value_minor, status, activated_at, matures_at)
-  values ($1,'RB-INV-T1',$2,$3,$4,$5,'WALLET',2,10000000,'NGN',20000000,1650,8760,3300000,23300000,'ACTIVE',now(),now()+interval '8760 hours')`,
+await investWrite(`insert into public.investments (id, reference, user_id, round_id, plan_id, property_id, funding_source, slots, slot_price_minor, currency, principal_minor, roi_bps, duration_hours, expected_profit_minor, maturity_value_minor, status, activated_at, matures_at, idempotency_key)
+  values ($1,'RB-INV-T1',$2,$3,$4,$5,'WALLET',2,10000000,'NGN',20000000,1650,8760,3300000,23300000,'PAYMENT_PENDING',null,null,'inv:create:${uid2}:fixture-t1')`,
   [invId, uid2, roundId, planPub, propPub]);
-await admin.query(`insert into public.investment_events (investment_id, event_type, actor_kind) values ($1,'ACTIVATED','SYSTEM')`, [invId]);
+await investWrite(`insert into public.investment_events (investment_id, event_type, actor_kind) values ($1,'ACTIVATED','SYSTEM')`, [invId]);
 
 // ── capacity / integrity constraints ─────────────────────────────────────────
+// investWrite keeps these exercising the CHECKs (not the Phase 6 write guard).
 await expectFail("over-allocation rejected", () =>
-  admin.query("update public.investment_rounds set allocated_slots=101 where id=$1", [roundId]));
+  investWrite("update public.investment_rounds set allocated_slots=101 where id=$1", [roundId], false));
 await expectFail("reserved+allocated overflow rejected", () =>
-  admin.query("update public.investment_rounds set reserved_slots=99, allocated_slots=2 where id=$1", [roundId]));
+  investWrite("update public.investment_rounds set reserved_slots=99, allocated_slots=2 where id=$1", [roundId], false));
 await expectFail("negative capacity rejected", () =>
-  admin.query("update public.investment_rounds set reserved_slots=-1 where id=$1", [roundId]));
+  investWrite("update public.investment_rounds set reserved_slots=-1 where id=$1", [roundId], false));
 await expectFail("total_slots=0 rejected", () =>
-  admin.query("insert into public.investment_rounds (plan_id,round_number,total_slots,slot_price_minor,currency,opens_at,closes_at) values ($1,9,0,1,'NGN',now(),now()+interval '1 day')", [planPub]));
+  investWrite("insert into public.investment_rounds (plan_id,round_number,total_slots,slot_price_minor,currency,opens_at,closes_at) values ($1,9,0,1,'NGN',now(),now()+interval '1 day')", [planPub], false));
 await expectFail("invalid round dates rejected", () =>
-  admin.query("insert into public.investment_rounds (plan_id,round_number,total_slots,slot_price_minor,currency,opens_at,closes_at) values ($1,9,10,1,'NGN',now()+interval '2 days',now())", [planPub]));
+  investWrite("insert into public.investment_rounds (plan_id,round_number,total_slots,slot_price_minor,currency,opens_at,closes_at) values ($1,9,10,1,'NGN',now()+interval '2 days',now())", [planPub], false));
 await expectFail("duplicate (plan_id,round_number) rejected", () =>
-  admin.query("insert into public.investment_rounds (plan_id,round_number,total_slots,slot_price_minor,currency,opens_at,closes_at) values ($1,1,10,1,'NGN',now(),now()+interval '1 day')", [planPub]));
+  investWrite("insert into public.investment_rounds (plan_id,round_number,total_slots,slot_price_minor,currency,opens_at,closes_at) values ($1,1,10,1,'NGN',now(),now()+interval '1 day')", [planPub], false));
 
 await expectFail("principal mismatch rejected", () =>
-  admin.query(`insert into public.investments (reference,user_id,round_id,plan_id,property_id,funding_source,slots,slot_price_minor,currency,principal_minor,roi_bps,duration_hours,expected_profit_minor,maturity_value_minor)
-    values ('RB-INV-BAD',$1,$2,$3,$4,'WALLET',2,10000000,'NGN',19999999,1650,8760,3300000,23299999)`, [uid2, roundId, planPub, propPub]));
+  investWrite(`insert into public.investments (reference,user_id,round_id,plan_id,property_id,funding_source,slots,slot_price_minor,currency,principal_minor,roi_bps,duration_hours,expected_profit_minor,maturity_value_minor)
+    values ('RB-INV-BAD',$1,$2,$3,$4,'WALLET',2,10000000,'NGN',19999999,1650,8760,3300000,23299999)`, [uid2, roundId, planPub, propPub], false));
 await expectFail("maturity_value mismatch rejected", () =>
-  admin.query(`insert into public.investments (reference,user_id,round_id,plan_id,property_id,funding_source,slots,slot_price_minor,currency,principal_minor,roi_bps,duration_hours,expected_profit_minor,maturity_value_minor)
-    values ('RB-INV-BAD2',$1,$2,$3,$4,'WALLET',2,10000000,'NGN',20000000,1650,8760,3300000,24000000)`, [uid2, roundId, planPub, propPub]));
+  investWrite(`insert into public.investments (reference,user_id,round_id,plan_id,property_id,funding_source,slots,slot_price_minor,currency,principal_minor,roi_bps,duration_hours,expected_profit_minor,maturity_value_minor)
+    values ('RB-INV-BAD2',$1,$2,$3,$4,'WALLET',2,10000000,'NGN',20000000,1650,8760,3300000,24000000)`, [uid2, roundId, planPub, propPub], false));
 await expectFail("duration_hours=0 rejected (plan)", () =>
   admin.query("insert into public.investment_plans (property_id,name,currency,slot_price_minor,roi_bps,duration_hours) values ($1,'x','NGN',1,0,0)", [propPub]));
 await expectFail("negative slot_price rejected", () =>
@@ -301,17 +319,20 @@ await expectFail("client cannot update kyc_verified", () =>
   asUser(uid2, "update public.profiles set kyc_verified=true where id=$1", [uid2]));
 
 // ── public catalogue RLS ─────────────────────────────────────────────────────
-r = await asAnon("select id from public.properties");
+// seed_tag filters: the Phase 6B catalogue seed adds legitimately-published
+// fixture rows; these assertions scope to non-seed data.
+r = await asAnon("select id from public.properties where seed_tag is null");
 check("anon sees only published properties", r.rows.length === 1 && r.rows[0].id === propPub, `saw ${r.rows.length}`);
 await expectFail("anon cannot read address column", () =>
   asAnon("select address from public.properties"));
 
-r = await asAnon("select id from public.investment_plans");
+r = await asAnon("select id from public.investment_plans where seed_tag is null");
 check("anon sees only published plans", r.rows.length === 1 && r.rows[0].id === planPub);
-r = await asAnon("select id from public.investment_rounds");
+r = await asAnon("select id from public.investment_rounds where seed_tag is null");
 check("anon sees rounds of published plans", r.rows.length === 1 && r.rows[0].id === roundId);
 
-r = await asAnon("select status from public.property_documents");
+r = await asAnon(`select d.status from public.property_documents d
+  join public.properties p on p.id = d.property_id where p.seed_tag is null`);
 check("anon sees reviewed evidence only", r.rows.length === 1 && r.rows[0].status === "VERIFIED", `saw ${r.rows.length}`);
 await expectFail("anon cannot read storage_path", () =>
   asAnon("select storage_path from public.property_documents"));
@@ -347,7 +368,7 @@ await expectFail("investor cannot write audit_log", () =>
 await admin.query("insert into public.admin_roles (user_id, role) values ($1,'SUPER_ADMIN')", [uid3]);
 await admin.query("insert into public.admin_roles (user_id, role) values ($1,'OPERATIONS_ADMIN')", [uid4]);
 
-r = await asUser(uid3, "select count(*)::int c from public.properties");
+r = await asUser(uid3, "select count(*)::int c from public.properties where seed_tag is null");
 check("super admin sees all properties", r.rows[0].c === 2, `saw ${r.rows[0].c}`);
 r = await asUser(uid4, "select count(*)::int c from public.investments");
 check("ops admin sees all investments", r.rows[0].c === 1);
@@ -1073,6 +1094,300 @@ await expectFail("investor cannot call confirm_deposit", () =>
 // direct writes blocked even with flags unset (service role, no flag)
 await expectFail("service direct deposit update blocked by guard", () =>
   asService(() => admin.query(`update public.deposits set status='FAILED' where id='${dep.id}'`)));
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 6B — investment engine + seeded catalogue
+// ═══════════════════════════════════════════════════════════════════════════
+
+console.log("── Phase 6: catalogue seed ────────────────────");
+
+r = await admin.query("select count(*)::int c from public.properties where seed_tag='p6-catalogue-fixtures'");
+check("6 seeded properties", r.rows[0].c === 6, `found ${r.rows[0].c}`);
+r = await admin.query("select count(*)::int c from public.investment_plans where seed_tag='p6-catalogue-fixtures'");
+check("6 seeded plans", r.rows[0].c === 6, `found ${r.rows[0].c}`);
+r = await admin.query("select count(*)::int c from public.investment_rounds where seed_tag='p6-catalogue-fixtures'");
+check("6 seeded rounds", r.rows[0].c === 6, `found ${r.rows[0].c}`);
+r = await admin.query(`select status, count(*)::int c from public.investment_rounds
+  where seed_tag='p6-catalogue-fixtures' group by 1`);
+const seedSt = Object.fromEntries(r.rows.map((x) => [x.status, x.c]));
+check("seed covers OPEN/NEARING/SOLD_OUT/SCHEDULED",
+  seedSt.OPEN === 3 && seedSt.NEARING_CAPACITY === 1 && seedSt.SOLD_OUT === 1 && seedSt.SCHEDULED === 1,
+  JSON.stringify(seedSt));
+r = await admin.query(`select pl.duration_hours, pl.roi_bps, pl.slot_price_minor from public.investment_plans pl
+  join public.properties p on p.id = pl.property_id where p.slug='the-terraces-ikoyi'`);
+check("terraces plan: 8760h / 1650bps / ₦100k", r.rows[0].duration_hours === 8760
+  && r.rows[0].roi_bps === 1650 && r.rows[0].slot_price_minor === "10000000");
+r = await admin.query(`select count(*)::int c from public.property_documents d
+  join public.properties p on p.id=d.property_id where p.seed_tag='p6-catalogue-fixtures'`);
+check("20 seeded docs", r.rows[0].c === 20, `found ${r.rows[0].c}`);
+// VERIFIED requires an auth.users reviewer; embedded runs the seed before
+// fixtures exist, so docs land IN_REVIEW locally and VERIFIED on hosted.
+r = await admin.query(`select d.status from public.property_documents d
+  join public.properties p on p.id=d.property_id
+  where p.slug='maitama-heights' and d.document_type='VALUATION'`);
+check("maitama pending valuation IN_REVIEW", r.rows[0]?.status === "IN_REVIEW");
+r = await admin.query(`select count(*)::int c from public.investments i
+  join public.investment_rounds r2 on r2.id = i.round_id where r2.seed_tag='p6-catalogue-fixtures'`);
+check("seed created no investments", r.rows[0].c === 0);
+r = await admin.query("select count(*)::int c from public.journal_entries where entity_type='investment'");
+check("seed created no journals", r.rows[0].c === 0);
+// fictional markers preserved
+r = await admin.query(`select bool_and(operator_name like '%fictional%') f from public.properties where seed_tag='p6-catalogue-fixtures'`);
+check("fictional operator markers preserved", r.rows[0].f === true);
+
+// fixture investors: uid6 funded+verified, uid7 funded+verified, uid8 unverified
+const uid6 = "66666666-6666-6666-6666-666666666666";
+const uid7 = "77777777-7777-7777-7777-777777777777";
+const uid8 = "88888888-8888-8888-8888-888888888888";
+await admin.query(`insert into auth.users (id,email,raw_user_meta_data) values
+  ('${uid6}','inv6@example.com','{"username":"inv6"}'),
+  ('${uid7}','inv7@example.com','{"username":"inv7"}'),
+  ('${uid8}','inv8@example.com','{"username":"inv8"}')`);
+await admin.query("update auth.users set email_confirmed_at=now() where id in ($1,$2)", [uid6, uid7]);
+await admin.query(`select public.post_journal('FUNDING_CREDIT','NGN',
+  '[{"account_key":"system:deposits_clearing","direction":"DEBIT","amount_minor":50000000},
+    {"account_key":"user:${uid6}:available","direction":"CREDIT","amount_minor":50000000}]'::jsonb,
+  null,'p6:fund6',null,null,'SYSTEM',null,null,'fund6')`);
+await admin.query(`select public.post_journal('FUNDING_CREDIT','NGN',
+  '[{"account_key":"system:deposits_clearing","direction":"DEBIT","amount_minor":30000000},
+    {"account_key":"user:${uid7}:available","direction":"CREDIT","amount_minor":30000000}]'::jsonb,
+  null,'p6:fund7',null,null,'SYSTEM',null,null,'fund7')`);
+
+const seedRound = async (slug) => first(await admin.query(
+  `select r.* from public.investment_rounds r
+   join public.investment_plans pl on pl.id = r.plan_id
+   join public.properties p on p.id = pl.property_id where p.slug = $1`, [slug]));
+const terraces = await seedRound("the-terraces-ikoyi");
+const wuse = await seedRound("wuse-square-residences");
+const maitama = await seedRound("maitama-heights");
+const harbour = await seedRound("harbour-view-suites");
+
+const expectErr = async (name, fn, needle) => {
+  try { await fn(); check(name, false, "no error raised"); }
+  catch (e) { check(name, e.message.includes(needle), e.message); }
+};
+
+console.log("── Phase 6: request_investment — happy path ───");
+
+// quote first — server-authoritative math + wallet eligibility
+let q = first(await asUserSession(uid6, () => admin.query(
+  `select public.investment_quote($1, 1) q`, [terraces.id]))).q;
+check("quote economics", q.principal_minor === 10000000 && q.expected_profit_minor === 1650000
+  && q.maturity_value_minor === 11650000 && q.available_slots === 160,
+  JSON.stringify(q));
+check("quote wallet funding available", q.funding_options[0].available === true
+  && q.funding_options[0].wallet_available_minor === 50000000);
+check("external funding rejected in quote", q.funding_options.every((o) => o.source === "WALLET" || o.available === false));
+
+let inv = first(await asUserSession(uid6, () => admin.query(
+  `select * from public.request_investment($1, 1, 'inv-happy', 'WALLET', 'req-inv-1')`, [terraces.id])));
+check("investment ACTIVE", inv.status === "ACTIVE" && /^INV-[0-9A-F]{12}$/.test(inv.reference));
+check("snapshot economics", inv.principal_minor === "10000000" && inv.expected_profit_minor === "1650000"
+  && inv.maturity_value_minor === "11650000" && inv.roi_bps === 1650 && inv.duration_hours === 8760
+  && inv.currency === "NGN" && inv.funding_source === "WALLET");
+check("activated + matures + funding ref", !!inv.activated_at && !!inv.matures_at && !!inv.payment_reference);
+r = await admin.query("select matures_at = activated_at + duration_hours * interval '1 hour' ok from public.investments where id=$1", [inv.id]);
+check("matures_at = activated + duration", r.rows[0].ok === true);
+r = await admin.query("select available_minor, reserved_minor from public.wallets where user_id=$1 and currency='NGN'", [uid6]);
+check("wallet debited ₦100k, reserved net 0", r.rows[0].available_minor === "40000000" && r.rows[0].reserved_minor === "0");
+r = await admin.query("select journal_type from public.journal_entries where entity_id=$1 order by created_at", [inv.id]);
+check("HOLD + INVESTMENT_DEBIT journals", r.rows.map((x) => x.journal_type).join() === "HOLD,INVESTMENT_DEBIT", JSON.stringify(r.rows));
+r = await admin.query(`select e.direction, e.amount_minor, a.key from public.ledger_entries e
+  join public.ledger_accounts a on a.id = e.account_id join public.journal_entries j on j.id=e.journal_id
+  where j.entity_id=$1 and j.journal_type='INVESTMENT_DEBIT' order by e.id`, [inv.id]);
+check("debit RESERVED → IPP shape", r.rows.length === 2
+  && r.rows[0].key === `user:${uid6}:reserved:NGN` && r.rows[0].direction === "DEBIT"
+  && r.rows[1].key === "system:investment_principal_payable:NGN" && r.rows[1].direction === "CREDIT",
+  JSON.stringify(r.rows));
+r = await admin.query("select event_type from public.investment_events where investment_id=$1 order by created_at", [inv.id]);
+check("3 lifecycle events", r.rows.map((x) => x.event_type).join() === "CREATED,PAYMENT_CONFIRMED,ACTIVATED",
+  JSON.stringify(r.rows.map((x) => x.event_type)));
+r = await admin.query("select allocated_slots from public.investment_rounds where id=$1", [terraces.id]);
+check("capacity consumed 332→333", r.rows[0].allocated_slots === 333);
+
+console.log("── Phase 6: idempotency ───────────────────────");
+
+let inv2 = first(await asUserSession(uid6, () => admin.query(
+  `select * from public.request_investment($1, 1, 'inv-happy', 'WALLET', 'req-inv-1')`, [terraces.id])));
+check("replay returns same investment", inv2.id === inv.id);
+r = await admin.query("select count(*)::int c from public.journal_entries where entity_id=$1", [inv.id]);
+check("no duplicate journals on replay", r.rows[0].c === 2);
+r = await admin.query("select allocated_slots from public.investment_rounds where id=$1", [terraces.id]);
+check("no second capacity consumption", r.rows[0].allocated_slots === 333);
+r = await admin.query("select count(*)::int c from public.investment_events where investment_id=$1", [inv.id]);
+check("no duplicate events", r.rows[0].c === 3);
+
+await expectErr("same key + different params → conflict", () =>
+  asUserSession(uid6, () => admin.query(
+    `select * from public.request_investment($1, 2, 'inv-happy')`, [terraces.id])), "ERR_IDEMPOTENCY_CONFLICT");
+r = await admin.query("select allocated_slots from public.investment_rounds where id=$1", [terraces.id]);
+check("conflict consumed no capacity", r.rows[0].allocated_slots === 333);
+
+console.log("── Phase 6: rejection paths ───────────────────");
+
+await expectErr("unverified email rejected", () =>
+  asUserSession(uid8, () => admin.query(
+    `select * from public.request_investment($1, 1, 'k8')`, [terraces.id])), "ERR_EMAIL_VERIFICATION_REQUIRED");
+await expectErr("anonymous rejected", () =>
+  asAnon(`select * from public.request_investment('${terraces.id}', 1, 'k')`), "denied");
+await expectErr("missing round", () =>
+  asUserSession(uid6, () => admin.query(
+    `select * from public.request_investment(gen_random_uuid(), 1, 'k-nf')`)), "ERR_ROUND_NOT_FOUND");
+await expectErr("scheduled round not open", () =>
+  asUserSession(uid6, () => admin.query(
+    `select * from public.request_investment($1, 1, 'k-sched')`, [maitama.id])), "ERR_ROUND_NOT_OPEN");
+await expectErr("sold-out round not open", () =>
+  asUserSession(uid6, () => admin.query(
+    `select * from public.request_investment($1, 5, 'k-so')`, [wuse.id])), "ERR_ROUND_NOT_OPEN");
+await expectErr("below min slots", () =>
+  asUserSession(uid6, () => admin.query(
+    `select * from public.request_investment($1, 1, 'k-min')`, [harbour.id])), "ERR_INVALID_SLOTS");
+await expectErr("CARD funding rejected", () =>
+  asUserSession(uid6, () => admin.query(
+    `select * from public.request_investment($1, 1, 'k-card', 'CARD')`, [terraces.id])), "ERR_FUNDING_SOURCE");
+await expectErr("zero slots rejected", () =>
+  asUserSession(uid6, () => admin.query(
+    `select * from public.request_investment($1, 0, 'k-zero')`, [terraces.id])), "ERR_INVALID_SLOTS");
+
+// insufficient balance — uid2 has ₦7,500 (fixture); capacity must not leak
+const terrBefore = (await admin.query("select allocated_slots from public.investment_rounds where id=$1", [terraces.id])).rows[0].allocated_slots;
+await expectErr("insufficient balance", () =>
+  asUserSession(uid2, () => admin.query(
+    `select * from public.request_investment($1, 1, 'k-poor')`, [terraces.id])), "ERR_INSUFFICIENT_BALANCE");
+r = await admin.query("select allocated_slots from public.investment_rounds where id=$1", [terraces.id]);
+check("no capacity leaked on failure", r.rows[0].allocated_slots === terrBefore);
+r = await admin.query("select count(*)::int c from public.investments where user_id=$1 and round_id=$2", [uid2, terraces.id]);
+check("no investment left on failure", r.rows[0].c === 0);
+
+// per-user limit — tiny fixture plan (max 2/user) on the terraces property
+const terracesProp = (await admin.query("select id from public.properties where slug='the-terraces-ikoyi'")).rows[0].id;
+const limitPlan = "eeeeeee1-0000-0000-0000-000000000001";
+const limitRound = "ffffffff-0000-0000-0000-000000000001";
+await admin.query(`insert into public.investment_plans (id,property_id,name,currency,slot_price_minor,roi_bps,duration_hours,min_slots,max_slots_per_user,status)
+  values ('${limitPlan}','${terracesProp}','Limit probe','NGN',100,500,24,1,2,'PUBLISHED')`);
+await investWrite(`insert into public.investment_rounds (id,plan_id,round_number,status,total_slots,slot_price_minor,currency,opens_at,closes_at)
+  values ('${limitRound}','${limitPlan}',1,'OPEN',50,100,'NGN',now(),now()+interval '7 days')`);
+await asUserSession(uid6, () => admin.query(`select * from public.request_investment('${limitRound}',2,'lim-1')`));
+await expectErr("per-user max enforced cumulatively", () =>
+  asUserSession(uid6, () => admin.query(`select * from public.request_investment('${limitRound}',1,'lim-2')`)),
+  "ERR_INVESTMENT_LIMIT_EXCEEDED");
+
+// capacity exceeded — small fixture round (2 total)
+const capPlan = "eeeeeee2-0000-0000-0000-000000000002";
+const capRound = "ffffffff-0000-0000-0000-000000000002";
+await admin.query(`insert into public.investment_plans (id,property_id,name,currency,slot_price_minor,roi_bps,duration_hours,min_slots,max_slots_per_user,status)
+  values ('${capPlan}','${terracesProp}','Capacity probe','NGN',100,500,24,1,10,'PUBLISHED')`);
+await investWrite(`insert into public.investment_rounds (id,plan_id,round_number,status,total_slots,slot_price_minor,currency,opens_at,closes_at)
+  values ('${capRound}','${capPlan}',1,'OPEN',1,100,'NGN',now(),now()+interval '7 days')`);
+await expectErr("beyond capacity rejected", () =>
+  asUserSession(uid6, () => admin.query(`select * from public.request_investment('${capRound}',3,'cap-1')`)),
+  "ERR_ROUND_CAPACITY_EXCEEDED");
+
+console.log("── Phase 6: capacity race ─────────────────────");
+
+// one slot left, two verified funded users race
+const c4 = new pg.Client({ host: "127.0.0.1", port: 55432, user: "postgres", password: "postgres", database: "verify" });
+await c4.connect();
+const raceAs = async (client, uid, key) => {
+  await client.query(`set request.jwt.claims = '{"sub":"${uid}"}'`);
+  await client.query("set role authenticated");
+  try { return await client.query(`select * from public.request_investment('${capRound}',1,'${key}')`); }
+  finally { await client.query("reset role"); await client.query(`set request.jwt.claims = ''`); }
+};
+const [ra, rb] = await Promise.allSettled([
+  raceAs(admin, uid6, "race-a"),
+  raceAs(c4, uid7, "race-b"),
+]);
+const winners = [ra, rb].filter((x) => x.status === "fulfilled").length;
+check("race: exactly one succeeds", winners === 1, `ok=${winners} ${ra.status === "rejected" ? ra.reason.message : ""} ${rb.status === "rejected" ? rb.reason.message : ""}`);
+const loser = [ra, rb].find((x) => x.status === "rejected");
+check("race loser gets typed capacity error", loser?.reason.message.includes("ERR_ROUND_CAPACITY_EXCEEDED")
+  || loser?.reason.message.includes("ERR_ROUND_NOT_OPEN"), loser?.reason?.message);
+r = await admin.query("select allocated_slots, status from public.investment_rounds where id=$1", [capRound]);
+check("exactly one slot consumed, round full→SOLD_OUT", r.rows[0].allocated_slots === 1 && r.rows[0].status === "SOLD_OUT");
+r = await admin.query(`select count(*)::int c from public.investments where round_id='${capRound}' and status='ACTIVE'`);
+check("exactly one ACTIVE investment", r.rows[0].c === 1);
+r = await admin.query(`select count(*)::int c from public.journal_entries j join public.investments i on j.entity_id=i.id::text where i.round_id='${capRound}' and j.journal_type='INVESTMENT_DEBIT'`);
+check("exactly one funding journal", r.rows[0].c === 1);
+await c4.end();
+
+console.log("── Phase 6: write guards + RLS ────────────────");
+
+await expectFail("direct investment insert blocked even with service role", () =>
+  asService(() => admin.query(`insert into public.investments (reference,user_id,round_id,plan_id,property_id,funding_source,slots,slot_price_minor,currency,principal_minor,roi_bps,duration_hours,expected_profit_minor,maturity_value_minor)
+    values ('X','${uid6}','${terraces.id}','${terraces.plan_id}','${terracesProp}','WALLET',1,1,'NGN',1,0,24,0,1)`)));
+await expectFail("direct round counter update blocked", () =>
+  asService(() => admin.query(`update public.investment_rounds set allocated_slots=0 where id='${terraces.id}'`)));
+await expectFail("direct event insert blocked", () =>
+  asService(() => admin.query(`insert into public.investment_events (investment_id,event_type,actor_kind) values ('${inv.id}','SETTLED','SYSTEM')`)));
+r = await asUser(uid7, `select id from public.investments where id='${inv.id}'`);
+check("investor cannot read another's investment", r.rows.length === 0);
+r = await asUser(uid6, `select id from public.investments where id='${inv.id}'`);
+check("investor reads own investment", r.rows.length === 1);
+
+// snapshot immutability — edit the plan after purchase; investment unchanged
+await admin.query(`update public.investment_plans set roi_bps=9999 where id='${terraces.plan_id}'`);
+r = await admin.query("select roi_bps, expected_profit_minor from public.investments where id=$1", [inv.id]);
+check("snapshot immune to plan edits", r.rows[0].roi_bps === 1650 && r.rows[0].expected_profit_minor === "1650000");
+await admin.query(`update public.investment_plans set roi_bps=1650 where id='${terraces.plan_id}'`);
+
+console.log("── Phase 6: quote + listing + admin ───────────");
+
+r = await asUserSession(uid2, () => admin.query("select jsonb_array_length(public.list_opportunities()) n"));
+check("list_opportunities returns seeded + fixture rows", r.rows[0].n >= 6, `n=${r.rows[0].n}`);
+await expectErr("anon cannot call list_opportunities", () => asAnon("select public.list_opportunities()"), "denied");
+await expectErr("anon cannot call investment_quote", () => asAnon(`select public.investment_quote('${terraces.id}',1)`), "denied");
+
+// admin RPCs — uid3 SUPER_ADMIN, uid1 FINANCE_ADMIN, uid4 OPERATIONS_ADMIN
+r = await asUserSession(uid3, () => admin.query(`select count(*)::int c from public.admin_list_investments()`));
+check("admin list returns investments", r.rows[0].c >= 2, `c=${r.rows[0].c}`);
+await expectErr("investor cannot list all investments", () =>
+  asUserSession(uid7, () => admin.query(`select * from public.admin_list_investments()`)), "not authorized");
+let det = first(await asUserSession(uid3, () => admin.query(`select public.admin_investment_detail('${inv.id}') d`))).d;
+check("admin detail has events + journals", det.events.length === 3 && det.journals.length === 2 && det.investment.idempotency_key === undefined);
+await expectErr("investor cannot read investment detail", () =>
+  asUserSession(uid7, () => admin.query(`select public.admin_investment_detail('${inv.id}')`)), "not authorized");
+
+// review flow — finance admin marks ACTIVE → REVIEW_REQUIRED, audited
+await expectErr("mark review requires reason", () =>
+  asUserSession(uid3, () => admin.query(`select public.admin_mark_investment_review('${inv.id}',' ')`)), "reason");
+await expectErr("ops admin cannot mark review", () =>
+  asUserSession(uid4, () => admin.query(`select public.admin_mark_investment_review('${inv.id}','x')`)), "not authorized");
+r = first(await asUserSession(uid1, () => admin.query(
+  `select public.admin_mark_investment_review('${inv.id}','reconciliation probe','rev-req-1') s`)));
+check("finance marks investment for review", r.s === "REVIEW_REQUIRED");
+r = await admin.query(`select count(*)::int c from public.audit_log where entity_id='${inv.id}' and action='INVESTMENT_REVIEW'`);
+check("review mark audited", r.rows[0].c === 1);
+r = await admin.query(`select event_type from public.investment_events where investment_id='${inv.id}' order by created_at desc limit 1`);
+check("review event appended", r.rows[0].event_type === "REVIEW_REQUIRED");
+// restore via the audited admin resolution RPC (apply_investment_transition
+// itself is service-only)
+await asUserSession(uid1, () => admin.query(
+  `select public.admin_resolve_investment_review('${inv.id}','ACTIVE','review complete','rev-req-2')`));
+r = await admin.query(`select status from public.investments where id='${inv.id}'`);
+check("review resolved back to ACTIVE", r.rows[0].status === "ACTIVE");
+await expectErr("ops admin cannot resolve review", () =>
+  asUserSession(uid4, () => admin.query(
+    `select public.admin_resolve_investment_review('${inv.id}','ACTIVE','x')`)), "not authorized");
+await expectErr("investor cannot call transition map", () =>
+  asUserSession(uid7, () => admin.query(
+    `select public.apply_investment_transition('${inv.id}','REVIEW_REQUIRED','INVESTOR')`)), "denied");
+await expectErr("invalid transition rejected", () =>
+  asService(() => admin.query(
+    `select public.apply_investment_transition('${inv.id}','PAYMENT_PENDING','SYSTEM')`)), "invalid investment transition");
+
+console.log("── Phase 6: reconciliation ────────────────────");
+
+r = await admin.query("select count(*)::int c from public.reconcile_wallets()");
+check("wallet reconciliation clean", r.rows[0].c === 0, `diffs=${r.rows[0].c}`);
+r = await admin.query("select check_name, count(*)::int c from public.reconcile_investments() group by 1");
+check("investment reconciliation clean", r.rows.length === 0, JSON.stringify(r.rows));
+await expectErr("investor cannot reconcile", () =>
+  asUserSession(uid7, () => admin.query(`select * from public.reconcile_investments()`)), "not authorized");
+// seed rows themselves produce no anomalies
+r = await admin.query(`select count(*)::int c from public.reconcile_investments() where entity_id in
+  (select id::text from public.investment_rounds where seed_tag='p6-catalogue-fixtures')`);
+check("seed rounds anomaly-free", r.rows[0].c === 0);
 
 // ── migration tracking convention untouched ──────────────────────────────────
 r = await admin.query(`select count(*)::int c from information_schema.tables
