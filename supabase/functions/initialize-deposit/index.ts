@@ -101,9 +101,20 @@ Deno.serve(async (req) => {
     }
 
     const webhookBase = `${SUPABASE_URL}/functions/v1`;
-    const init = input.provider === "PAYSTACK"
-      ? await paystackInit(dep, user.user.email ?? null, `${webhookBase}/payment-webhook-paystack`)
-      : await korapayInit(dep, user.user.email ?? null, `${webhookBase}/payment-webhook-korapay`);
+    let init;
+    try {
+      init = input.provider === "PAYSTACK"
+        ? await paystackInit(dep, user.user.email ?? null, `${webhookBase}/payment-webhook-paystack`)
+        : await korapayInit(dep, user.user.email ?? null, `${webhookBase}/payment-webhook-korapay`);
+    } catch (e) {
+      // provider init failed — do not leave the deposit stranded in INITIATED
+      await svc.rpc("fail_deposit_init", {
+        p_deposit_id: dep.id,
+        p_error: (e as Error).message,
+        p_request_id: rid,
+      }).catch(() => undefined);
+      throw e;
+    }
 
     const { data: done, error: cErr } = await svc.rpc("complete_deposit_init", {
       p_deposit_id: dep.id,

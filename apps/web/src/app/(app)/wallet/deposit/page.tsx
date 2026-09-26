@@ -61,8 +61,11 @@ export default function DepositPage() {
 
   const min = options.data?.minDeposit ?? wallet.data.policies.minDeposit;
   const max = options.data?.maxDeposit ?? null;
+  // Launch rule (Phase 5): Paystack/KoraPay are NGN rails only. A non-NGN
+  // wallet sees the future-provider state — never an NGN provider.
+  const isNgn = wallet.data.currency === "NGN";
   // Server-configured providers only — a disabled rail is never selectable.
-  const available = options.data?.providers.filter((p) => p.enabled) ?? [];
+  const available = isNgn ? (options.data?.providers.filter((p) => p.enabled) ?? []) : [];
   const selectedProvider = provider && available.some((p) => p.id === provider)
     ? provider
     : available[0]?.id ?? null;
@@ -137,8 +140,10 @@ export default function DepositPage() {
             {available.length === 0 ? (
               <StatePanel
                 tone="warning"
-                title="No deposit providers available"
-                copy="Online deposits are temporarily unavailable. Please try again later."
+                title={isNgn ? "No deposit providers available" : "International deposits coming soon"}
+                copy={isNgn
+                  ? "Online deposits are temporarily unavailable. Please try again later."
+                  : "Paystack and KoraPay support NGN deposits only. USD deposits will be enabled with a future provider — no action needed."}
               />
             ) : (
               available.map((p) => {
