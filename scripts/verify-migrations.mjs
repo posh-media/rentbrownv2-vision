@@ -64,6 +64,23 @@ await admin.query(`
     $$ select nullif(nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub','')::uuid $$;
   alter default privileges in schema public grant select, insert, update, delete on tables to authenticated;
   alter default privileges in schema public grant usage on sequences to authenticated;
+
+  -- storage stub (mirrors Supabase Storage) — kyc-documents bucket + RLS
+  create schema if not exists storage;
+  create table if not exists storage.buckets (
+    id text primary key, name text not null, public boolean not null default false);
+  create table if not exists storage.objects (
+    id uuid primary key default gen_random_uuid(),
+    bucket_id text references storage.buckets(id),
+    name text,
+    owner uuid,
+    created_at timestamptz default now(),
+    updated_at timestamptz default now());
+  alter table storage.objects enable row level security;
+  grant usage on schema storage to authenticated, anon, service_role;
+  grant select, insert, update, delete on storage.objects to authenticated, service_role;
+  grant select on storage.buckets to authenticated, anon, service_role;
+  grant insert on storage.buckets to service_role;
 `);
 
 // ── apply migrations ─────────────────────────────────────────────────────────
@@ -387,7 +404,7 @@ check("investor gets nothing from admin RPC", r.rows.length === 0);
 
 // ── admin_config: seeds, validation, history, audit ──────────────────────────
 r = await admin.query("select count(*)::int c from public.admin_config");
-check("admin_config seeded (10 phase-3 + 16 payment + 3 maturity keys)", r.rows[0].c === 29, `found ${r.rows[0].c}`);
+check("admin_config seeded (10 phase-3 + 16 payment + 3 maturity + 9 phase-8 keys)", r.rows[0].c === 38, `found ${r.rows[0].c}`);
 r = await admin.query("select value from public.admin_config where key='referral.signup_reward_minor'");
 check("signup reward seeded = 150000", r.rows[0].value === 150000, r.rows[0].value);
 r = await admin.query("select value from public.admin_config where key='platform.supported_currencies'");
@@ -957,6 +974,13 @@ await c3.end();
 
 console.log("── Phase 5: withdrawals + outbox ────────────────");
 
+// Phase 8 gates exist now: FIXED min mode for these legacy-amount tests and a
+// PIN for the withdrawal user (uid4's first request rides the D-8.12
+// first-withdrawal KYC exception — ₦5,000 < ₦10,000 threshold).
+await asUserSession(uid3, () => admin.query(
+  `select public.set_admin_config('withdrawal.min_mode','"FIXED"'::jsonb,'p5 legacy min','req-p5')`));
+await asUserSession(uid4, () => admin.query(`select public.set_transaction_pin('424242')`));
+
 await expectFail("withdrawal below minimum rejected", () =>
   asUserSession(uid4, () => admin.query(
     `select * from public.request_withdrawal(400000,'{"bank_name":"GTB","account_number":"0123","account_name":"A"}'::jsonb,'w-min')`)));
@@ -968,7 +992,7 @@ await expectFail("withdrawal bad destination rejected", () =>
     `select * from public.request_withdrawal(500000,'{"bank_name":"GTB"}'::jsonb,'w-dest')`)));
 
 let wd = first(await asUserSession(uid4, () => admin.query(
-  `select * from public.request_withdrawal(500000,'{"bank_name":"GTBank","account_number":"0123456789","account_name":"Ada Okafor"}'::jsonb,'w-1')`)));
+  `select * from public.request_withdrawal(500000,'{"bank_name":"GTBank","account_number":"0123456789","account_name":"Ada Okafor"}'::jsonb,'w-1',null,'424242')`)));
 check("withdrawal REQUESTED", wd.status === "REQUESTED" && /^WD-[0-9A-F]{12}$/.test(wd.reference));
 check("fee snapshot 5%", wd.fee_minor === "25000" && wd.net_minor === "475000", `fee=${wd.fee_minor}`);
 check("hold journal linked", wd.hold_journal_id !== null);
@@ -979,7 +1003,7 @@ r = await admin.query("select status, payload->>'spec' spec, payload->>'event_ty
 check("outbox row queued with v1 payload", r.rows[0].status === "QUEUED" && r.rows[0].spec === "rentbrown.outbound.v1" && r.rows[0].et === "withdrawal.requested");
 
 let wd1b = first(await asUserSession(uid4, () => admin.query(
-  `select * from public.request_withdrawal(500000,'{"bank_name":"GTBank","account_number":"0123456789","account_name":"Ada Okafor"}'::jsonb,'w-1')`)));
+  `select * from public.request_withdrawal(500000,'{"bank_name":"GTBank","account_number":"0123456789","account_name":"Ada Okafor"}'::jsonb,'w-1',null,'424242')`)));
 check("withdrawal init idempotent", wd1b.id === wd.id);
 r = await admin.query("select reserved_minor from public.wallets where user_id=$1 and currency='NGN'", [uid4]);
 check("retry did not double-hold", r.rows[0].reserved_minor === "580000", r.rows[0].reserved_minor);
@@ -1012,8 +1036,21 @@ depF = first(await asService(() => admin.query(
 await asService(() => admin.query(
   `select * from public.confirm_deposit($1,200000,'NGN','tf2','success',null)`, [depF.id]));
 
+// w-1 consumed uid4's first-withdrawal exception — w-2 requires verified KYC.
+// Run the real lifecycle: draft → submit → finance-admin approve.
+let k4 = first(await asUserSession(uid4, () => admin.query(
+  `select * from public.kyc_save_draft('Ada Okafor','FEMALE','22222222222','UTILITY_BILL')`)));
+k4 = first(await asUserSession(uid4, () => admin.query(
+  `select * from public.kyc_save_draft(null,null,null,null,'${uid4}/' || $1::text || '/selfie.jpg','${uid4}/' || $1::text || '/poa.pdf')`, [k4.id])));
+await asUserSession(uid4, () => admin.query(`insert into storage.objects (bucket_id,name) values
+  ('kyc-documents','${uid4}/${k4.id}/selfie.jpg'),('kyc-documents','${uid4}/${k4.id}/poa.pdf')`));
+k4 = first(await asUserSession(uid4, () => admin.query(`select * from public.kyc_submit($1)`, [k4.id])));
+await asUserSession(uid1, () => admin.query(`select * from public.admin_decide_kyc($1,'APPROVE','docs verified')`, [k4.id]));
+r = await admin.query("select kyc_verified from public.profiles where id=$1", [uid4]);
+check("uid4 kyc verified (profile projection)", r.rows[0].kyc_verified === true);
+
 let wd2 = first(await asUserSession(uid4, () => admin.query(
-  `select * from public.request_withdrawal(500000,'{"bank_name":"GTBank","account_number":"0123456789","account_name":"Ada Okafor"}'::jsonb,'w-2')`)));
+  `select * from public.request_withdrawal(500000,'{"bank_name":"GTBank","account_number":"0123456789","account_name":"Ada Okafor"}'::jsonb,'w-2',null,'424242')`)));
 wd2 = first(await asUserSession(uid1, () => admin.query(`select * from public.decide_withdrawal($1,'REJECT','docs unclear')`, [wd2.id])));
 check("withdrawal REJECTED", wd2.status === "REJECTED" && wd2.release_journal_id !== null);
 r = await admin.query("select journal_type from public.journal_entries where id=$1", [wd2.release_journal_id]);
@@ -1626,7 +1663,348 @@ check("reconciliation: only the intentional mismatch remains",
 r = await admin.query("select count(*)::int c from public.reconcile_wallets()");
 check("wallet reconciliation still clean", r.rows[0].c === 0);
 
-// ── migration tracking convention untouched ──────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// PHASE 8B — KYC + PIN + withdrawal gates
+// ════════════════════════════════════════════════════════════════════════════
+
+console.log("── Phase 8: KYC lifecycle ──────────────────────");
+
+const uid9  = "99999999-9999-9999-9999-999999999999";
+const uid10 = "10101010-1010-1010-1010-101010101010";
+const uid11 = "11111111-aaaa-1111-aaaa-111111111111";
+const uid12 = "12121212-1212-1212-1212-121212121212";
+const uid13 = "13131313-1313-1313-1313-131313131313";
+await admin.query(`insert into auth.users (id,email,raw_user_meta_data) values
+  ('${uid9}','k9@example.com','{"username":"kycuser9"}'),
+  ('${uid10}','k10@example.com','{"username":"kycuser10"}'),
+  ('${uid11}','w11@example.com','{"username":"wduser11"}'),
+  ('${uid12}','w12@example.com','{"username":"wduser12"}'),
+  ('${uid13}','w13@example.com','{"username":"wduser13"}')`);
+
+await expectFail("anon cannot read kyc status", () =>
+  asAnon("select public.kyc_get_own()"));
+let ks = first(await asUserSession(uid9, () => admin.query("select public.kyc_get_own() k")));
+check("fresh user is NOT_STARTED", ks.k.status === "NOT_STARTED" && ks.k.submission === null);
+
+let s9 = first(await asUserSession(uid9, () => admin.query(
+  `select * from public.kyc_save_draft('Kassim Nine','MALE','99999999999','BANK_STATEMENT')`)));
+check("draft created", s9.status === "DRAFT" && s9.attempt_no === 1);
+await expectErr("incomplete submit rejected", () =>
+  asUserSession(uid9, () => admin.query(`select * from public.kyc_submit('${s9.id}')`)),
+  "ERR_INCOMPLETE");
+await expectErr("bad bvn rejected", () =>
+  asUserSession(uid9, () => admin.query(
+    `select * from public.kyc_save_draft(null,null,'12345')`)), "ERR_BVN");
+s9 = first(await asUserSession(uid9, () => admin.query(
+  `select * from public.kyc_save_draft(null,null,null,null,'${uid9}/' || $1::text || '/selfie.jpg','${uid9}/' || $1::text || '/poa.pdf')`, [s9.id])));
+// upload the referenced evidence while the submission is still a DRAFT
+await asUserSession(uid9, () => admin.query(`insert into storage.objects (bucket_id,name) values
+  ('kyc-documents','${uid9}/${s9.id}/selfie.jpg'),('kyc-documents','${uid9}/${s9.id}/poa.pdf')`));
+await expectErr("foreign storage path rejected", () =>
+  asUserSession(uid10, () => admin.query(
+    `select * from public.kyc_save_draft('Teni Ten','FEMALE','10101010101','UTILITY_BILL','${uid9}/x/selfie.jpg')`)),
+  "ERR_STORAGE");
+s9 = first(await asUserSession(uid9, () => admin.query(`select * from public.kyc_submit($1)`, [s9.id])));
+check("submission SUBMITTED", s9.status === "SUBMITTED" && s9.submitted_at !== null);
+await expectErr("submitted evidence is locked", () =>
+  asUserSession(uid9, () => admin.query(`select * from public.kyc_save_draft('Other Name')`)),
+  "ERR_KYC_STATE");
+await expectFail("investor cannot self-approve", () =>
+  asUserSession(uid9, () => admin.query(`select * from public.admin_decide_kyc('${s9.id}','APPROVE','x')`)));
+await expectFail("plain investor cannot list kyc cases", () =>
+  asUserSession(uid2, () => admin.query(`select * from public.admin_list_kyc_cases()`)));
+
+r = await asUserSession(uid1, () => admin.query(`select * from public.admin_list_kyc_cases('PENDING')`));
+const kycRows = r.rows.map((x) => x.admin_list_kyc_cases);
+check("finance admin sees pending queue", kycRows.some((x) => x.id === s9.id)
+  && kycRows.every((x) => !x.document_number_masked || x.document_number_masked.startsWith("***")));
+let caseOps = first(await asUserSession(uid4, () => admin.query(
+  `select public.admin_get_kyc_case('${s9.id}') c`))).c;
+check("ops reader sees masked bvn", caseOps.bvn === "***9999", caseOps.bvn);
+let caseFin = first(await asUserSession(uid1, () => admin.query(
+  `select public.admin_get_kyc_case('${s9.id}') c`))).c;
+check("reviewer sees full bvn", caseFin.bvn === "99999999999", caseFin.bvn);
+
+s9 = first(await asUserSession(uid1, () => admin.query(
+  `select * from public.admin_decide_kyc($1,'APPROVE','documents verified','req-k9')`, [s9.id])));
+check("kyc VERIFIED via reviewer", s9.status === "VERIFIED" && s9.reviewed_by === uid1);
+r = await admin.query("select kyc_verified, kyc_verified_at is not null has_at from public.profiles where id=$1", [uid9]);
+check("profile projection synced", r.rows[0].kyc_verified === true && r.rows[0].has_at === true);
+r = await admin.query("select to_status::text t from public.kyc_events where submission_id=$1 order by id", [s9.id]);
+check("kyc event trail", r.rows.map((x) => x.t).join() === "DRAFT,SUBMITTED,UNDER_REVIEW,VERIFIED", JSON.stringify(r.rows));
+await expectErr("verified submission cannot be edited", () =>
+  asUserSession(uid9, () => admin.query(`select * from public.kyc_save_draft('Hack Name')`)),
+  "ERR_KYC_STATE");
+await expectFail("bvn column is restricted", () =>
+  asUser(uid9, "select bvn from public.kyc_submissions"));
+r = await asUser(uid9, "select id from public.kyc_submissions");
+check("owner reads own submission only", r.rows.length === 1);
+r = await asUser(uid2, "select id from public.kyc_submissions");
+check("cross-user kyc isolation", r.rows.length === 0);
+
+// reject → resubmit → supersede → verify
+let s10 = first(await asUserSession(uid10, () => admin.query(
+  `select * from public.kyc_save_draft('Teni Ten','FEMALE','10101010101','UTILITY_BILL')`)));
+s10 = first(await asUserSession(uid10, () => admin.query(
+  `select * from public.kyc_save_draft(null,null,null,null,'${uid10}/' || $1::text || '/selfie.jpg','${uid10}/' || $1::text || '/poa.pdf')`, [s10.id])));
+await asUserSession(uid10, () => admin.query(`select * from public.kyc_submit($1)`, [s10.id]));
+await expectErr("reject requires reason", () =>
+  asUserSession(uid1, () => admin.query(`select * from public.admin_decide_kyc('${s10.id}','REJECT')`)),
+  "rejection reason is required");
+s10 = first(await asUserSession(uid1, () => admin.query(
+  `select * from public.admin_decide_kyc($1,'REJECT','document unreadable','req-k10')`, [s10.id])));
+check("kyc REJECTED with reason", s10.status === "REJECTED" && s10.rejection_reason === "document unreadable");
+let s10b = first(await asUserSession(uid10, () => admin.query(
+  `select * from public.kyc_save_draft('Teni Ten','FEMALE','10101010101','BANK_STATEMENT')`)));
+check("resubmission opens attempt 2", s10b.attempt_no === 2 && s10b.status === "DRAFT" && s10b.id !== s10.id);
+r = await admin.query("select status::text s from public.kyc_submissions where id=$1", [s10.id]);
+check("old attempt SUPERSEDED", r.rows[0].s === "SUPERSEDED");
+s10b = first(await asUserSession(uid10, () => admin.query(
+  `select * from public.kyc_save_draft(null,null,null,null,'${uid10}/' || $1::text || '/selfie.jpg','${uid10}/' || $1::text || '/poa.pdf')`, [s10b.id])));
+await asUserSession(uid10, () => admin.query(`insert into storage.objects (bucket_id,name) values
+  ('kyc-documents','${uid10}/${s10b.id}/selfie.jpg'),('kyc-documents','${uid10}/${s10b.id}/poa.pdf')`));
+await asUserSession(uid10, () => admin.query(`select * from public.kyc_submit($1)`, [s10b.id]));
+s10b = first(await asUserSession(uid3, () => admin.query(
+  `select * from public.admin_decide_kyc($1,'APPROVE','resubmitted docs ok','req-k10b')`, [s10b.id])));
+check("resubmission VERIFIED", s10b.status === "VERIFIED");
+
+console.log("── Phase 8: storage policies ───────────────────");
+
+// uid11 opens a draft (never submitted) to exercise storage write policies.
+let s11 = first(await asUserSession(uid11, () => admin.query(
+  `select * from public.kyc_save_draft('W Eleven','OTHER','11111111111','UTILITY_BILL')`)));
+r = await asUserSession(uid11, () => admin.query(`insert into storage.objects (bucket_id,name) values
+  ('kyc-documents','${uid11}/${s11.id}/selfie.jpg') returning name`));
+check("owner uploads to own draft path", r.rows.length === 1);
+// reference the uploaded object on the draft so it is not an orphan
+await asUserSession(uid11, () => admin.query(
+  `select * from public.kyc_save_draft(null,null,null,null,'${uid11}/${s11.id}/selfie.jpg',null)`));
+await expectFail("foreign-prefix upload denied", () =>
+  asUser(uid9, `insert into storage.objects (bucket_id,name) values
+    ('kyc-documents','${uid11}/${s11.id}/evil.jpg')`));
+await expectFail("wrong-submission upload denied", () =>
+  asUser(uid11, `insert into storage.objects (bucket_id,name) values
+    ('kyc-documents','${uid11}/${s9.id}/evil.jpg')`));
+r = await asUser(uid11, "select name from storage.objects where bucket_id='kyc-documents'");
+check("owner reads own objects", r.rows.length === 1);
+r = await asUser(uid2, "select name from storage.objects where bucket_id='kyc-documents'");
+check("non-reviewer sees no kyc objects", r.rows.length === 0);
+r = await asUser(uid1, "select name from storage.objects where bucket_id='kyc-documents'");
+check("reviewer reads kyc objects", r.rows.length === 7, `rows=${r.rows.length}`);
+await expectFail("non-draft evidence immutable", () =>
+  asUser(uid11, `insert into storage.objects (bucket_id,name) values
+    ('kyc-documents','${uid9}/${s9.id}/late.jpg')`));
+
+console.log("── Phase 8: transaction PIN ────────────────────");
+
+await expectErr("pin must be 6 digits", () =>
+  asUserSession(uid9, () => admin.query(`select public.set_transaction_pin('12345')`)), "ERR_PIN");
+await asUserSession(uid9, () => admin.query(`select public.set_transaction_pin('654321')`));
+r = await asUserSession(uid9, () => admin.query(`select public.verify_transaction_pin('000000') v`));
+check("wrong pin returns false (attempt counted)", r.rows[0].v === false);
+for (let i = 0; i < 4; i++) {
+  r = await asUserSession(uid9, () => admin.query(`select public.verify_transaction_pin('000000') v`));
+  check(`bad pin attempt ${i + 2} counted`, r.rows[0].v === false);
+}
+await expectErr("pin locked after max attempts", () =>
+  asUserSession(uid9, () => admin.query(`select public.verify_transaction_pin('654321')`)),
+  "ERR_PIN_LOCKED");
+// re-setting the PIN clears lockout (lost-PIN recovery is Phase 9)
+await asUserSession(uid9, () => admin.query(`select public.set_transaction_pin('654321')`));
+r = await asUserSession(uid9, () => admin.query(`select public.verify_transaction_pin('654321') v`));
+check("pin verifies after reset", r.rows[0].v === true);
+await expectFail("user_pins not client-readable", () =>
+  asUser(uid9, "select * from public.user_pins"));
+r = await admin.query(`select count(*)::int c from public.audit_log
+  where action='security.pin_set' and actor_id=$1`, [uid9]);
+check("pin set audited", r.rows[0].c >= 2);
+
+console.log("── Phase 8: bank accounts + dynamic min + quote ─");
+
+let ba9 = first(await asUserSession(uid9, () => admin.query(
+  `select * from public.save_bank_account('GTBank','058','0123456789','Kassim Nine',true)`)));
+check("bank account saved", ba9.is_default === true);
+r = await asUser(uid9, "select id from public.user_bank_accounts");
+check("owner lists own bank accounts", r.rows.length === 1);
+r = await asUser(uid2, "select id from public.user_bank_accounts");
+check("cross-user bank isolation", r.rows.length === 0);
+await expectFail("cross-user archive denied", () =>
+  asUserSession(uid10, () => admin.query(`select public.archive_bank_account('${ba9.id}')`)));
+
+// dynamic minimum = one-slot maturity of cheapest published plan
+// (wuse: 1,000,000 × 1.125 = 1,125,000)
+await asUserSession(uid3, () => admin.query(
+  `select public.set_admin_config('withdrawal.min_mode','"DYNAMIC"'::jsonb,'p8 dynamic test','req-dyn')`));
+r = await admin.query("select public.min_withdrawal_minor('NGN'::public.currency_code) m");
+r = await admin.query(`select m, expected from (select public.min_withdrawal_minor('NGN'::public.currency_code) m,
+  (select min(floor(slot_price_minor * (10000 + roi_bps) / 10000))::bigint
+     from public.investment_plans where status='PUBLISHED' and currency='NGN') expected) t`);
+check("dynamic min = cheapest plan slot maturity", r.rows[0].m === r.rows[0].expected,
+  `m=${r.rows[0].m} expected=${r.rows[0].expected}`);
+await asUserSession(uid3, () => admin.query(
+  `select public.set_admin_config('withdrawal.min_mode','"FIXED"'::jsonb,'p8 fixed restore','req-dyn2')`));
+r = await admin.query("select public.min_withdrawal_minor('NGN'::public.currency_code) m");
+check("fixed fallback = configured min", r.rows[0].m === "500000", r.rows[0].m);
+
+await asUserSession(uid1, () => admin.query(
+  `select * from public.admin_post_adjustment('${uid9}','NGN','AVAILABLE',5000000,'CREDIT','p8 funding','req-p8-a','adj:p8-9')`));
+let qt = first(await asUserSession(uid9, () => admin.query(
+  `select public.quote_withdrawal(1500000) q`))).q;
+check("quote computes fee+net", qt.fee_minor === 75000 && qt.net_minor === 1425000
+  && qt.eligible === true && qt.kyc_verified === true, JSON.stringify(qt));
+
+console.log("── Phase 8: withdrawal gates ───────────────────");
+
+// verified + PIN + funds + bank-account destination snapshot
+let wd9 = first(await asUserSession(uid9, () => admin.query(
+  `select * from public.request_withdrawal(1500000,null,'w9-1',null,'654321','${ba9.id}')`)));
+check("verified withdrawal REQUESTED", wd9.status === "REQUESTED" && typeof wd9.destination === "object");
+check("destination snapshot copied", wd9.destination.bank_name === "GTBank"
+  && wd9.destination.account_number === "0123456789" && wd9.destination.bank_account_id === ba9.id);
+await asUserSession(uid9, () => admin.query(`select public.archive_bank_account('${ba9.id}')`));
+r = await admin.query("select destination from public.withdrawals where id=$1", [wd9.id]);
+check("snapshot survives bank archive", r.rows[0].destination.account_number === "0123456789");
+await expectErr("wrong pin rejected", () =>
+  asUserSession(uid9, () => admin.query(
+    `select * from public.request_withdrawal(500000,'{"bank_name":"GTB","account_number":"0123","account_name":"A"}'::jsonb,'w9-bad',null,'000000')`)),
+  "ERR_PIN");
+await expectErr("insufficient balance rejected", () =>
+  asUserSession(uid9, () => admin.query(
+    `select * from public.request_withdrawal(99999999,'{"bank_name":"GTB","account_number":"0123","account_name":"A"}'::jsonb,'w9-big',null,'654321')`)),
+  "insufficient available balance");
+// idempotent replay returns the same withdrawal without re-verifying PIN
+let wd9b = first(await asUserSession(uid9, () => admin.query(
+  `select * from public.request_withdrawal(1500000,null,'w9-1')`)));
+check("idempotent retry returns original", wd9b.id === wd9.id);
+
+// first-withdrawal exception (D-8.12): uid11 — no KYC, PIN set, funded
+await asUserSession(uid11, () => admin.query(`select public.set_transaction_pin('112233')`));
+await asUserSession(uid1, () => admin.query(
+  `select * from public.admin_post_adjustment('${uid11}','NGN','AVAILABLE',3000000,'CREDIT','p8 funding','req-p8-b','adj:p8-11')`));
+qt = first(await asUserSession(uid11, () => admin.query(`select public.quote_withdrawal(800000) q`))).q;
+check("quote flags first-withdrawal exemption", qt.first_withdrawal === true && qt.kyc_exempt === true
+  && qt.eligible === true && qt.kyc_verified === false, JSON.stringify(qt));
+let wd11 = first(await asUserSession(uid11, () => admin.query(
+  `select * from public.request_withdrawal(800000,'{"bank_name":"GTB","account_number":"0111","account_name":"W Eleven"}'::jsonb,'w11-1',null,'112233')`)));
+check("first withdrawal below threshold needs no KYC", wd11.status === "REQUESTED");
+await expectErr("second withdrawal requires KYC", () =>
+  asUserSession(uid11, () => admin.query(
+    `select * from public.request_withdrawal(600000,'{"bank_name":"GTB","account_number":"0111","account_name":"W Eleven"}'::jsonb,'w11-2',null,'112233')`)),
+  "ERR_KYC");
+
+// declined/failed/rejected still consumes the exception
+wd11 = first(await asUserSession(uid1, () => admin.query(
+  `select * from public.decide_withdrawal('${wd11.id}','REJECT','test decline','req-wd11')`)));
+check("decline releases hold + event", wd11.status === "REJECTED" && wd11.release_journal_id !== null);
+r = await admin.query(`select event_type from public.outbound_events
+  where aggregate_id='${wd11.id}' order by created_at`);
+check("requested + rejected outbox events", r.rows.map((x) => x.event_type).join() === "withdrawal.requested,withdrawal.rejected");
+await expectErr("declined first wd still consumes exception", () =>
+  asUserSession(uid11, () => admin.query(
+    `select * from public.request_withdrawal(500000,'{"bank_name":"GTB","account_number":"0111","account_name":"W Eleven"}'::jsonb,'w11-3',null,'112233')`)),
+  "ERR_KYC");
+
+// boundary: exactly at threshold requires KYC (strictly-less-than)
+await asUserSession(uid12, () => admin.query(`select public.set_transaction_pin('121212')`));
+await asUserSession(uid1, () => admin.query(
+  `select * from public.admin_post_adjustment('${uid12}','NGN','AVAILABLE',2000000,'CREDIT','p8 funding','req-p8-c','adj:p8-12')`));
+await expectErr("amount == threshold requires KYC", () =>
+  asUserSession(uid12, () => admin.query(
+    `select * from public.request_withdrawal(1000000,'{"bank_name":"GTB","account_number":"0222","account_name":"W Twelve"}'::jsonb,'w12-1',null,'121212')`)),
+  "ERR_KYC");
+let wd12 = first(await asUserSession(uid12, () => admin.query(
+  `select * from public.request_withdrawal(999999,'{"bank_name":"GTB","account_number":"0222","account_name":"W Twelve"}'::jsonb,'w12-2',null,'121212')`)));
+check("amount < threshold exempt", wd12.status === "REQUESTED");
+
+// concurrency: two parallel first withdrawals — exactly one wins the exception
+await asUserSession(uid13, () => admin.query(`select public.set_transaction_pin('131313')`));
+await asUserSession(uid1, () => admin.query(
+  `select * from public.admin_post_adjustment('${uid13}','NGN','AVAILABLE',2000000,'CREDIT','p8 funding','req-p8-d','adj:p8-13')`));
+const cA = new pg.Client({ host: "127.0.0.1", port: 55432, user: "postgres", password: "postgres", database: "verify" });
+await cA.connect();
+const wdRace = async (client, key) => {
+  await client.query(`set request.jwt.claims = '{"sub":"${uid13}"}'`);
+  await client.query("set role authenticated");
+  try {
+    return await client.query(
+      `select * from public.request_withdrawal(800000,'{"bank_name":"GTB","account_number":"0333","account_name":"W Thirteen"}'::jsonb,'${key}',null,'131313')`);
+  } finally { await client.query("reset role"); }
+};
+const [w13a, w13b] = await Promise.allSettled([wdRace(admin, "w13-a"), wdRace(cA, "w13-b")]);
+await cA.end();
+r = await admin.query("select count(*)::int c from public.withdrawals where user_id=$1", [uid13]);
+check("concurrent first withdrawals — exactly one persists", r.rows[0].c === 1, `rows=${r.rows[0].c}`);
+check("loser got ERR_KYC", [w13a, w13b].filter((x) => x.status === "rejected").length === 1,
+  JSON.stringify([w13a.status, w13b.status]));
+
+// concurrent same-wallet double-spend: uid9 has ₦35,000 available — two ₦30,000 asks, one wins
+const cB = new pg.Client({ host: "127.0.0.1", port: 55432, user: "postgres", password: "postgres", database: "verify" });
+await cB.connect();
+const wdRace9 = async (client, key) => {
+  await client.query(`set request.jwt.claims = '{"sub":"${uid9}"}'`);
+  await client.query("set role authenticated");
+  try {
+    return await client.query(
+      `select * from public.request_withdrawal(3000000,'{"bank_name":"GTB","account_number":"0999","account_name":"K Nine"}'::jsonb,'${key}',null,'654321')`);
+  } finally { await client.query("reset role"); }
+};
+const [r9a, r9b] = await Promise.allSettled([wdRace9(admin, "w9-race-a"), wdRace9(cB, "w9-race-b")]);
+await cB.end();
+r = await admin.query(`select count(*)::int c, coalesce(sum(amount_minor),0)::bigint s from public.withdrawals
+  where user_id=$1 and idempotency_key like 'wd:init:${uid9}:w9-race%'`, [uid9]);
+check("concurrent spend — exactly one withdrawal", r.rows[0].c === 1, `rows=${r.rows[0].c}`);
+
+// admin queue + outcome outbox on mark-paid
+r = await asUserSession(uid1, () => admin.query(`select * from public.admin_list_withdrawals('REQUESTED'::public.withdrawal_status)`));
+const wdRows = r.rows.map((x) => x.admin_list_withdrawals);
+check("admin withdrawal queue", wdRows.length >= 2 && wdRows.every((x) => x.status === "REQUESTED"));
+let wdDet = first(await asUserSession(uid1, () => admin.query(
+  `select public.admin_get_withdrawal('${wd12.id}') d`))).d;
+check("admin detail has timeline+outbound", Array.isArray(wdDet.events) && Array.isArray(wdDet.outbound)
+  && wdDet.outbound.some((o) => o.event_type === "withdrawal.requested"));
+await expectFail("plain investor cannot list admin withdrawals", () =>
+  asUserSession(uid2, () => admin.query(`select * from public.admin_list_withdrawals()`)));
+
+await asUserSession(uid1, () => admin.query(`select * from public.decide_withdrawal('${wd12.id}','APPROVE')`));
+await asUserSession(uid1, () => admin.query(`select * from public.decide_withdrawal('${wd12.id}','PROCESSING')`));
+wd12 = first(await asUserSession(uid1, () => admin.query(
+  `select * from public.decide_withdrawal('${wd12.id}','MARK_PAID','paid via transfer','req-wd12')`)));
+check("withdrawal paid", wd12.status === "COMPLETED" && wd12.payout_journal_id !== null);
+r = await admin.query(`select event_type from public.outbound_events where aggregate_id='${wd12.id}'`);
+check("withdrawal.completed outbox", r.rows.some((x) => x.event_type === "withdrawal.completed"));
+
+console.log("── Phase 8: reconciliation ─────────────────────");
+
+r = await asUserSession(uid1, () => admin.query(`select check_name from public.reconcile_withdrawals()`));
+check("withdrawal reconciliation clean", r.rows.length === 0, JSON.stringify(r.rows));
+await admin.query(`begin;
+  select set_config('app.withdrawal_write','1',true);
+  update public.withdrawals set hold_journal_id=null where id='${wd9.id}';
+  commit;`);
+r = await asUserSession(uid1, () => admin.query(`select check_name from public.reconcile_withdrawals()`));
+check("requested_without_hold detected", r.rows.some((x) => x.check_name === "requested_without_hold"));
+await admin.query(`begin;
+  select set_config('app.withdrawal_write','1',true);
+  update public.withdrawals set hold_journal_id='${wd9.hold_journal_id}' where id='${wd9.id}';
+  commit;`);
+
+r = await asUserSession(uid1, () => admin.query(`select check_name, entity_id, detail from public.reconcile_kyc()`));
+if (r.rows.length) {
+  const dbg = await admin.query(`select id, status, selfie_path, poa_path from public.kyc_submissions order by created_at`);
+  console.log("  DEBUG submissions:", JSON.stringify(dbg.rows));
+  const dbg2 = await admin.query(`select name from storage.objects order by name`);
+  console.log("  DEBUG objects:", JSON.stringify(dbg2.rows));
+}
+check("kyc reconciliation clean", r.rows.length === 0, JSON.stringify(r.rows));
+await admin.query("update public.profiles set kyc_verified=true where id=$1", [uid2]);
+r = await asUserSession(uid1, () => admin.query(`select check_name, entity_id from public.reconcile_kyc()`));
+check("flag-without-submission detected", r.rows.some((x) => x.check_name === "profile_flag_without_verified_submission" && x.entity_id === uid2));
+await admin.query("update public.profiles set kyc_verified=false where id=$1", [uid2]);
+await expectFail("investor cannot run withdrawal reconcile", () =>
+  asUserSession(uid9, () => admin.query(`select * from public.reconcile_withdrawals()`)));
+
+// ════════════════════════════════════════════════════════════════════════════
+
 r = await admin.query(`select count(*)::int c from information_schema.tables
   where table_name='schema_migrations' and table_schema not in ('public')`);
 check("no competing migration tracker introduced", r.rows[0].c === 0);

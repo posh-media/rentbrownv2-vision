@@ -83,7 +83,7 @@ function KycQueue() {
 
   return (
     <div>
-      <PageHeader title="KYC review" description="Identity verification queue. Decisions are mock intents recorded to the audit trail." />
+      <PageHeader title="KYC review" description="Identity verification queue. Decisions are recorded to the audit trail and shown to the applicant." />
 
       <Tabs value={queue} onValueChange={(v) => { setQueue(v as KycReviewQueue); setPage(1); }}>
         <TabsList className="mb-4">

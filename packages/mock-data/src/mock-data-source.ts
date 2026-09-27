@@ -218,6 +218,44 @@ export function createMockDataSource(options: MockDataSourceOptions = {}): Inves
 
     getProfile: () => respond("getProfile", () => clone<UserProfile>(state.profile)),
     getKyc: () => respond("getKyc", () => clone<KycSummary>(state.kyc)),
+    saveKycDraft: (input) => respond("saveKycDraft", () => {
+      const done = new Set<"PERSONAL" | "IDENTITY" | "ADDRESS" | "SELFIE">();
+      if (state.kyc.status === "VERIFIED") done.add("PERSONAL");
+      if (input.fullLegalName && input.gender) done.add("PERSONAL");
+      if (input.bvn) done.add("IDENTITY");
+      if (input.poaType) done.add("ADDRESS");
+      if (state.kyc.status === "PENDING_REVIEW" || state.kyc.status === "VERIFIED") {
+        state.kyc.steps.forEach((s) => done.add(s.id));
+      }
+      state.kyc.status = state.kyc.status === "VERIFIED" ? "VERIFIED" : "IN_PROGRESS";
+      let currentSet = false;
+      state.kyc.steps = state.kyc.steps.map((s) => {
+        if (done.has(s.id)) return { ...s, state: "complete" as const };
+        if (!currentSet) {
+          currentSet = true;
+          return { ...s, state: "current" as const };
+        }
+        return { ...s, state: "upcoming" as const };
+      });
+      return clone<KycSummary>(state.kyc);
+    }),
+    uploadKycDocument: (kind) => respond("uploadKycDocument", () => {
+      const stepId = kind === "SELFIE" ? "SELFIE" : "ADDRESS";
+      state.kyc.status = "IN_PROGRESS";
+      state.kyc.steps = state.kyc.steps.map((s) => (s.id === stepId ? { ...s, state: "complete" as const } : s));
+      return clone<KycSummary>(state.kyc);
+    }),
+    submitKyc: () => respond("submitKyc", () => {
+      state.kyc.status = "PENDING_REVIEW";
+      state.kyc.submittedAt = now;
+      state.kyc.steps = state.kyc.steps.map((s) => ({ ...s, state: "complete" as const }));
+      return clone<KycSummary>(state.kyc);
+    }),
+    setTransactionPin: (pin) => respond("setTransactionPin", () => {
+      if (!/^\d{6}$/.test(pin)) throw new Error("PIN must be exactly 6 digits.");
+      state.profile.security.hasTransactionPin = true;
+    }),
+    hasTransactionPin: () => respond("hasTransactionPin", () => state.profile.security.hasTransactionPin),
     getDashboard: () => respond("getDashboard", dashboard),
 
     listOpportunities: (filter) => respond("listOpportunities", () => clone(listOpps(filter))),
@@ -345,6 +383,27 @@ export function createMockDataSource(options: MockDataSourceOptions = {}): Inves
     }),
     getWithdrawal: (id) => respond("getWithdrawal", () => clone(state.withdrawals.find((w) => w.id === id) ?? null)),
     listWithdrawals: () => respond("listWithdrawals", () => clone(state.withdrawals)),
+    saveBankAccount: (input) => respond("saveBankAccount", () => {
+      const method = {
+        id: `pm_${input.accountNumber.slice(-4)}_${state.wallet.payoutMethods.length}`,
+        bankName: input.bankName,
+        bankCode: input.bankCode,
+        accountNumberMasked: `•••• ${input.accountNumber.slice(-4)}`,
+        accountName: input.accountName,
+        isDefault: input.makeDefault ?? state.wallet.payoutMethods.length === 0,
+        verified: true,
+        addedAt: now,
+      };
+      if (method.isDefault) state.wallet.payoutMethods.forEach((m) => (m.isDefault = false));
+      state.wallet.payoutMethods.push(method);
+      return clone(method);
+    }),
+    archiveBankAccount: (id) => respond("archiveBankAccount", () => {
+      state.wallet.payoutMethods = state.wallet.payoutMethods.filter((m) => m.id !== id);
+    }),
+    setDefaultBankAccount: (id) => respond("setDefaultBankAccount", () => {
+      state.wallet.payoutMethods.forEach((m) => (m.isDefault = m.id === id));
+    }),
 
     getReferralSummary: () => respond("getReferralSummary", () => clone(state.referralSummary)),
     listReferrals: () => respond("listReferrals", () => clone(state.referrals)),

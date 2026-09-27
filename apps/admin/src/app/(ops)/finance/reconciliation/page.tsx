@@ -5,7 +5,7 @@ import type { ReconciliationItem } from "@rentbrown/types";
 import { formatDateTime, formatMoney, humanizeStatus } from "@rentbrown/utils";
 import { cn } from "@rentbrown/ui";
 
-import { useReconciliation } from "../../../../lib/data/hooks";
+import { useKycReconciliation, useReconciliation, useWithdrawalReconciliation } from "../../../../lib/data/hooks";
 import { ColumnDef, DataTable } from "../../../../components/data-table";
 import { DetailDrawer, DetailRow } from "../../../../components/detail-drawer";
 import { FilterBar, FilterSelect } from "../../../../components/filter-bar";
@@ -146,10 +146,65 @@ function ReconciliationBoard() {
   );
 }
 
+/** Phase 8B detection-only checks: withdrawal holds/payouts and KYC pipeline. */
+function IntegrityChecks() {
+  const withdrawals = useWithdrawalReconciliation();
+  const kyc = useKycReconciliation();
+  const sections = [
+    { title: "Withdrawals & payout ledger", query: withdrawals },
+    { title: "KYC pipeline", query: kyc },
+  ] as const;
+
+  return (
+    <div className="mt-8">
+      <h2 className="eyebrow mb-3 text-muted-foreground">Ledger integrity checks</h2>
+      <div className="grid gap-4 lg:grid-cols-2">
+        {sections.map(({ title, query }) => {
+          const items = query.data ?? [];
+          return (
+            <section key={title} className="financial-card p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-bold">{title}</h3>
+                {query.isSuccess ? (
+                  <span className="text-[11px] text-muted-foreground">
+                    {items.length === 0 ? "No anomalies" : `${items.length} anomal${items.length === 1 ? "y" : "ies"}`}
+                  </span>
+                ) : null}
+              </div>
+              {query.isLoading ? (
+                <p className="text-xs text-muted-foreground">Running checks…</p>
+              ) : query.isError ? (
+                <p className="text-xs text-[var(--error-fg)]">{query.error.message}</p>
+              ) : items.length === 0 ? (
+                <p className="text-xs text-muted-foreground">All checks pass — nothing flagged.</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {items.map((r, i) => (
+                  <div key={i} className="rounded-md border border-warning-border bg-warning-soft p-3">
+                    <p className="text-xs font-bold text-[var(--warning-fg)]">{r.checkName}</p>
+                    <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+                      {r.entityType} · {r.entityId}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">{r.detail}</p>
+                  </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function ReconciliationPage() {
   return (
     <PermissionGate permission="finance.read" mode="page">
-      <ReconciliationBoard />
+      <>
+        <ReconciliationBoard />
+        <IntegrityChecks />
+      </>
     </PermissionGate>
   );
 }

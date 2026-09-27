@@ -202,6 +202,25 @@ export function useWithdrawals() {
   });
 }
 
+export function usePinStatus() {
+  const ds = useDataSource();
+  const session = useSession();
+  return useQuery({
+    queryKey: ["pin-status"],
+    queryFn: () => ds.hasTransactionPin(),
+    enabled: !!session.data,
+  });
+}
+
+export function useSetTransactionPin() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (pin: string) => ds.setTransactionPin(pin),
+    onSuccess: () => void qc.invalidateQueries(),
+  });
+}
+
 export function useReferralSummary() {
   const ds = useDataSource();
   const session = useSession();

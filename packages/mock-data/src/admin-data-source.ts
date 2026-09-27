@@ -309,6 +309,12 @@ export function createMockAdminDataSource(options: MockAdminDataSourceOptions = 
 
     getKycCase: (id: string) => respond(() => clone(store.kycCases.find((c) => c.id === id) ?? null)),
 
+    getKycDocumentUrl: () =>
+      Promise.reject(new Error("Document preview isn't available in the demo dataset.")),
+
+    reconcileWithdrawals: () => respond(() => []),
+    reconcileKyc: () => respond(() => []),
+
     decideKyc: (input: KycDecisionInput) =>
       respond(() => {
         requireIdempotency(input);

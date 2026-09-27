@@ -7,7 +7,10 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type {
+  BankAccountInput,
   InvestmentFilter,
+  KycDocumentKind,
+  KycDraftInput,
   MinorUnits,
   Opportunity,
   OpportunityFilter,
@@ -212,6 +215,76 @@ export function useRequestWithdrawal() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: RequestWithdrawalInput) => ds.requestWithdrawal(input),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useSaveBankAccount() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: BankAccountInput) => ds.saveBankAccount(input),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useArchiveBankAccount() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => ds.archiveBankAccount(id),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useSetDefaultBankAccount() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => ds.setDefaultBankAccount(id),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function usePinStatus() {
+  const ds = useDataSource();
+  const key = useKey();
+  return useQuery({ queryKey: key("pin-status"), queryFn: () => ds.hasTransactionPin() });
+}
+
+export function useSetTransactionPin() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (pin: string) => ds.setTransactionPin(pin),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useSaveKycDraft() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: KycDraftInput) => ds.saveKycDraft(input),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useSubmitKyc() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => ds.submitKyc(),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useUploadKycDocument() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { kind: KycDocumentKind; file: Blob; fileName?: string }) =>
+      ds.uploadKycDocument(input.kind, input.file, input.fileName),
     onSuccess: () => qc.invalidateQueries(),
   });
 }

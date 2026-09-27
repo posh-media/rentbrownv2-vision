@@ -29,13 +29,17 @@ export function PinConfirmDialog({
   currency: CurrencyCode;
   destination: string;
   loading: boolean;
-  onConfirm: () => void;
+  onConfirm: (pin: string) => void;
 }) {
   const [pin, setPin] = React.useState("");
 
   const handleOpenChange = (next: boolean) => {
     if (!next) setPin("");
     onOpenChange(next);
+  };
+
+  const confirm = () => {
+    if (pin.length === 6) onConfirm(pin);
   };
 
   return (
@@ -48,14 +52,20 @@ export function PinConfirmDialog({
             <span className="mt-1 block">to {destination}</span>
           </DialogDescription>
         </DialogHeader>
-        <PinInput value={pin} onChange={setPin} onComplete={() => onConfirm()} disabled={loading} />
-        <p className="mt-3 text-xs text-muted-foreground">Prototype: any 6 digits are accepted.</p>
+        <PinInput value={pin} onChange={setPin} onComplete={confirm} disabled={loading} />
+        <p className="mt-3 text-xs text-muted-foreground">
+          Your 6-digit transaction PIN.{" "}
+          <a href="/account/security" className="font-semibold text-primary hover:underline">
+            Set or change it in Security
+          </a>
+          .
+        </p>
         <DialogFooter>
           <Button variant="ghost" onClick={() => handleOpenChange(false)} disabled={loading}>
             Cancel
           </Button>
-          <Button onClick={onConfirm} disabled={pin.length !== 6 || loading}>
-            {loading ? "Confirming…" : "Confirm investment"}
+          <Button onClick={confirm} disabled={pin.length !== 6 || loading}>
+            {loading ? "Confirming…" : "Confirm"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -192,6 +192,18 @@ export function useDecideWithdrawal() {
   });
 }
 
+export function useWithdrawalReconciliation(enabled = true) {
+  const ds = useDataSource();
+  const key = useKey();
+  return useQuery({ queryKey: key("withdrawal-reconciliation"), queryFn: () => ds.reconcileWithdrawals(), enabled });
+}
+
+export function useKycReconciliation(enabled = true) {
+  const ds = useDataSource();
+  const key = useKey();
+  return useQuery({ queryKey: key("kyc-reconciliation"), queryFn: () => ds.reconcileKyc(), enabled });
+}
+
 export function useTransactions(filter?: FinanceFilter) {
   const ds = useDataSource();
   const key = useKey();

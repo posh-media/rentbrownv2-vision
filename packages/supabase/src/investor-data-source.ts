@@ -1,5 +1,6 @@
 import type {
   AuthGateway,
+  BankAccountInput,
   DashboardSummary,
   DepositIntent,
   DepositOptions,
@@ -13,9 +14,18 @@ import type {
   InvestmentSubmission,
   InvestmentTimelineEvent,
   InvestorDataSource,
+  KycDocumentKind,
+  KycDraftInput,
+  KycGender,
+  KycPoaType,
+  KycStatus,
+  KycStep,
+  KycSubmissionSummary,
+  KycSummary,
   Opportunity,
   OpportunityFilter,
   PaymentStatus,
+  PayoutMethod,
   ProofDocument,
   ProofDocumentStatus,
   ProofDocumentType,
@@ -28,6 +38,9 @@ import type {
   UserProfile,
   WalletAccountType,
   WalletSummary,
+  Withdrawal,
+  WithdrawalQuote,
+  WithdrawalStatus,
 } from "@rentbrown/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -66,6 +79,10 @@ async function invokeErrorMessage(error: unknown): Promise<string> {
 
 const hours = (h: number): Duration => ({ value: h, unit: "HOURS" });
 
+/** Display-only minor-unit formatting (NGN) — no financial math here. */
+const fmtMinor = (minor: number): string =>
+  `₦${(minor / 100).toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 /** Typed RPC error → investor-facing message. The code stays on the Error. */
 function investmentError(error: { message?: string }): Error {
   const msg = error.message ?? "";
@@ -84,9 +101,28 @@ function investmentError(error: { message?: string }): Error {
     ERR_INVALID_SLOTS: "Choose a valid number of slots for this plan.",
     ERR_PLAN_NOT_AVAILABLE: "This plan isn't available for investment.",
     ERR_CURRENCY: "This round isn't available in your wallet currency.",
+    // Phase 8B — KYC / PIN / withdrawal gates
+    ERR_PIN: "Incorrect transaction PIN.",
+    ERR_PIN_NOT_SET: "Set a transaction PIN before withdrawing.",
+    ERR_PIN_LOCKED: "Too many failed PIN attempts — try again later.",
+    ERR_KYC: "Identity verification is required before withdrawing.",
+    ERR_DESTINATION: "Choose a valid bank account.",
+    ERR_BVN: "BVN must be exactly 11 digits.",
+    ERR_INCOMPLETE: "Complete every field and upload both documents before submitting.",
+    ERR_KYC_STATE: "This submission can't be changed in its current state.",
+    ERR_STORAGE: "The document couldn't be linked to your submission — try again.",
+    "insufficient available balance": "Your available balance can't cover this withdrawal.",
+    "bank account not found": "That bank account is no longer saved — add it again.",
+    "kyc submission not found": "Your verification draft was not found — start again.",
+    "account is not active": "Your account isn't active yet. Contact support if this seems wrong.",
     "authentication required": "Sign in to continue.",
   };
-  const text = (code && friendly[code]) ?? msg ?? "The investment could not be submitted.";
+  const text =
+    (code && friendly[code]) ??
+    (code === "ERR_AMOUNT"
+      ? `Enter a valid amount${msg.match(/minimum withdrawal is (\d+)/) ? ` (minimum ${fmtMinor(Number(msg.match(/minimum withdrawal is (\d+)/)![1]))})` : "."}`
+      : msg) ??
+    "The request could not be completed.";
   const err = new Error(text);
   if (code) Object.assign(err, { code });
   return err;
@@ -464,9 +500,10 @@ function applyTransactionFilter(items: Transaction[], filter?: TransactionFilter
  * InvestorDataSource where identity/session is REAL (Supabase Auth +
  * public.profiles) and, since Phase 6B, the investment engine domain reads
  * (catalogue, quotes, submissions, portfolio, wallet, transactions) are real
- * too. Domains without real tables yet (KYC, notifications, referrals,
- * withdrawals, content) still delegate to the mock source, which also serves
- * the unauthenticated demo path.
+ * too. Phase 8B added the real KYC lifecycle, transaction PIN, saved bank
+ * accounts and the gated withdrawal flow. Domains without real tables yet
+ * (notifications, referrals, content) still delegate to the mock source,
+ * which also serves the unauthenticated demo path.
  *
  * Screens keep depending on InvestorDataSource; nothing in this file knows
  * about React, and no screen imports @supabase/supabase-js directly.
@@ -515,9 +552,16 @@ export function createSupabaseInvestorDataSource(
   };
 
   const fetchWalletSummary = async (): Promise<WalletSummary> => {
-    // Policies + payout methods keep delegating — no real tables for them yet.
+    // Real balances + saved bank accounts + live withdrawal/deposit policy; the
+    // mock shell only supplies fields without a server source yet.
     const shell = await domain.getWallet();
-    const { data, error } = await client.from("wallets").select("*").eq("currency", "NGN").maybeSingle();
+    const [walletRes, accounts, quote, depositOpts] = await Promise.all([
+      client.from("wallets").select("*").eq("currency", "NGN").maybeSingle(),
+      fetchBankAccounts(),
+      client.rpc("quote_withdrawal", { p_amount_minor: 0 }),
+      client.rpc("deposit_options"),
+    ]);
+    const { data, error } = walletRes;
     if (error) throw investmentError(error);
     if (!data) return shell;
     const w = data as {
@@ -530,13 +574,23 @@ export function createSupabaseInvestorDataSource(
       BONUS: w.bonus_minor,
       PENDING: w.pending_minor,
     };
+    const q = quote.data as RawWithdrawalQuote | null;
+    const d = depositOpts.data as { min_minor?: number | null } | null;
     return {
       ...shell,
       currency: "NGN",
       balances,
       total: w.available_minor + w.reserved_minor + w.bonus_minor + w.pending_minor,
       updatedAt: w.updated_at,
-      payoutMethods: [], // no real destination table yet — empty beats fictional banks
+      payoutMethods: accounts,
+      policies: {
+        ...shell.policies,
+        withdrawalFeeBps: q?.fee_bps ?? shell.policies.withdrawalFeeBps,
+        withdrawalFeeCap: q?.fee_cap_minor ?? shell.policies.withdrawalFeeCap,
+        minWithdrawal: q?.min_minor ?? shell.policies.minWithdrawal,
+        minDeposit: d?.min_minor ?? shell.policies.minDeposit,
+        kycRequiredForWithdrawal: q?.kyc_required ?? shell.policies.kycRequiredForWithdrawal,
+      },
     };
   };
 
@@ -572,6 +626,293 @@ export function createSupabaseInvestorDataSource(
     };
   };
 
+  // ── Phase 8B: KYC, transaction PIN, bank accounts, withdrawals ─────────────
+
+  interface RawBankAccount {
+    id: string;
+    bank_name: string;
+    bank_code: string;
+    account_number: string;
+    account_name: string;
+    is_default: boolean;
+    created_at: string;
+  }
+
+  const maskAccount = (n: string): string => `•••• ${n.slice(-4)}`;
+
+  const mapPayoutMethod = (b: RawBankAccount): PayoutMethod => ({
+    id: b.id,
+    bankName: b.bank_name,
+    bankCode: b.bank_code,
+    accountNumberMasked: maskAccount(b.account_number),
+    accountName: b.account_name,
+    isDefault: b.is_default,
+    verified: true,
+    addedAt: b.created_at,
+  });
+
+  const fetchBankAccounts = async (): Promise<PayoutMethod[]> => {
+    const { data, error } = await client
+      .from("user_bank_accounts")
+      .select("id,bank_name,bank_code,account_number,account_name,is_default,created_at")
+      .is("archived_at", null)
+      .order("created_at", { ascending: true });
+    if (error) throw investmentError(error);
+    return ((data ?? []) as RawBankAccount[]).map(mapPayoutMethod);
+  };
+
+  interface RawWithdrawalQuote {
+    currency: "NGN" | "USD";
+    amount_minor: number;
+    available_minor: number;
+    min_minor: number | null;
+    fee_minor: number | null;
+    net_minor: number | null;
+    fee_bps: number | null;
+    fee_cap_minor: number | null;
+    kyc_verified: boolean;
+    kyc_required: boolean;
+    first_withdrawal: boolean;
+    first_without_kyc_max_minor: number | null;
+    kyc_exempt: boolean;
+    pin_set: boolean;
+    eligible: boolean;
+    blocked_reason: string | null;
+  }
+
+  const fetchWithdrawalQuote = async (amount: number, destinationId?: string): Promise<WithdrawalQuote> => {
+    const { data, error } = await client.rpc("quote_withdrawal", {
+      p_amount_minor: amount,
+      p_bank_account_id: destinationId ?? null,
+    });
+    if (error) throw investmentError(error);
+    const q = data as RawWithdrawalQuote;
+    const feeBps = q.fee_bps ?? 0;
+    return {
+      amount: q.amount_minor ?? amount,
+      fee: q.fee_minor ?? 0,
+      netAmount: q.net_minor ?? Math.max(0, amount - (q.fee_minor ?? 0)),
+      currency: q.currency,
+      feeDescription:
+        `${(feeBps / 100).toLocaleString("en-NG", { maximumFractionDigits: 2 })}% fee` +
+        (q.fee_cap_minor != null ? `, capped at ${fmtMinor(q.fee_cap_minor)}` : ""),
+      minAmount: q.min_minor ?? 0,
+      maxAmount: q.available_minor,
+      eligible: q.eligible,
+      blockedReason: q.blocked_reason ?? undefined,
+      estimatedArrival: "Typically within 1 business day after review",
+      feeBps,
+      feeCap: q.fee_cap_minor ?? undefined,
+      available: q.available_minor,
+      kycRequired: q.kyc_required,
+      kycExempt: q.kyc_exempt,
+      pinSet: q.pin_set,
+    };
+  };
+
+  interface RawWithdrawalDestination {
+    bank_name?: string;
+    bank_code?: string;
+    account_number?: string;
+    account_name?: string;
+    bank_account_id?: string;
+  }
+
+  interface RawWithdrawalRow {
+    id: string;
+    reference: string;
+    currency: "NGN" | "USD";
+    amount_minor: number;
+    fee_minor: number;
+    net_minor: number;
+    destination: RawWithdrawalDestination | null;
+    status: WithdrawalStatus;
+    requested_at: string;
+    reviewed_at: string | null;
+    paid_at: string | null;
+    rejected_at: string | null;
+  }
+
+  interface RawWithdrawalEvent {
+    id: number;
+    withdrawal_id: string;
+    from_status: string | null;
+    to_status: string;
+    source: string;
+    note: string | null;
+    created_at: string;
+  }
+
+  /** Canonical forward rail for the status page's progress timeline. */
+  const WD_RAIL: WithdrawalStatus[] = ["REQUESTED", "UNDER_REVIEW", "APPROVED", "PROCESSING", "COMPLETED"];
+
+  const mapWithdrawalDestination = (row: RawWithdrawalRow): PayoutMethod => {
+    const d = row.destination ?? {};
+    const acct = d.account_number ?? "";
+    return {
+      id: d.bank_account_id ?? `dest-${row.id}`,
+      bankName: d.bank_name ?? "Bank account",
+      bankCode: d.bank_code ?? "",
+      accountNumberMasked: acct ? maskAccount(acct) : "••••",
+      accountName: d.account_name ?? "",
+      isDefault: false,
+      verified: true,
+      addedAt: row.requested_at,
+    };
+  };
+
+  const mapWithdrawal = (row: RawWithdrawalRow, events: RawWithdrawalEvent[]): Withdrawal => {
+    const timeline = events.map((e) => ({
+      status: e.to_status as WithdrawalStatus,
+      at: e.created_at as string | null,
+      note: e.note ?? undefined,
+    }));
+    const terminal = ["COMPLETED", "REJECTED", "FAILED"].includes(row.status);
+    if (!terminal) {
+      const reached = new Set(timeline.map((t) => t.status));
+      for (const s of WD_RAIL) if (!reached.has(s)) timeline.push({ status: s, at: null, note: undefined });
+    }
+    const rejected = [...events].reverse().find((e) => e.to_status === "REJECTED" || e.to_status === "FAILED");
+    return {
+      id: row.id,
+      reference: row.reference,
+      amount: row.amount_minor,
+      fee: row.fee_minor,
+      netAmount: row.net_minor,
+      currency: row.currency,
+      destination: mapWithdrawalDestination(row),
+      status: row.status,
+      requestedAt: row.requested_at,
+      completedAt: row.paid_at,
+      rejectionReason: rejected?.note ?? undefined,
+      timeline,
+    };
+  };
+
+  const WD_SELECT =
+    "id,reference,currency,amount_minor,fee_minor,net_minor,destination,status,requested_at,reviewed_at,paid_at,rejected_at";
+
+  const fetchWithdrawalEvents = async (ids: string[]): Promise<Map<string, RawWithdrawalEvent[]>> => {
+    if (ids.length === 0) return new Map();
+    const { data, error } = await client
+      .from("withdrawal_events")
+      .select("id,withdrawal_id,from_status,to_status,source,note,created_at")
+      .in("withdrawal_id", ids)
+      .order("id", { ascending: true });
+    if (error) throw investmentError(error);
+    const byWd = new Map<string, RawWithdrawalEvent[]>();
+    for (const e of (data ?? []) as RawWithdrawalEvent[]) {
+      const list = byWd.get(e.withdrawal_id) ?? [];
+      list.push(e);
+      byWd.set(e.withdrawal_id, list);
+    }
+    return byWd;
+  };
+
+  const fetchWithdrawal = async (id: string): Promise<Withdrawal | null> => {
+    const { data, error } = await client.from("withdrawals").select(WD_SELECT).eq("id", id).maybeSingle();
+    if (error) throw investmentError(error);
+    if (!data) return null;
+    const row = data as unknown as RawWithdrawalRow;
+    const events = await fetchWithdrawalEvents([row.id]);
+    return mapWithdrawal(row, events.get(row.id) ?? []);
+  };
+
+  interface RawKycSubmission {
+    id: string;
+    attempt_no: number;
+    status: "DRAFT" | "SUBMITTED" | "UNDER_REVIEW" | "VERIFIED" | "REJECTED";
+    full_legal_name: string | null;
+    gender: KycGender | null;
+    bvn_masked: string | null;
+    poa_type: KycPoaType | null;
+    has_selfie: boolean;
+    has_poa: boolean;
+    provider: string;
+    submitted_at: string | null;
+    reviewed_at: string | null;
+    rejection_reason: string | null;
+  }
+
+  interface RawKycOwn {
+    status: "NOT_STARTED" | RawKycSubmission["status"];
+    submission: RawKycSubmission | null;
+  }
+
+  const KYC_STATUS: Record<string, KycStatus> = {
+    NOT_STARTED: "NOT_STARTED",
+    DRAFT: "IN_PROGRESS",
+    SUBMITTED: "PENDING_REVIEW",
+    UNDER_REVIEW: "PENDING_REVIEW",
+    VERIFIED: "VERIFIED",
+    REJECTED: "REJECTED",
+  };
+
+  const kycSteps = (status: KycStatus, s: RawKycSubmission | null): KycStep[] => {
+    const defs: Array<{ id: KycStep["id"]; title: string; description: string; done: boolean }> = [
+      { id: "PERSONAL", title: "Personal details", description: "Your full legal name and gender.", done: !!s?.full_legal_name && !!s?.gender },
+      { id: "IDENTITY", title: "Bank Verification Number", description: "Your 11-digit BVN.", done: !!s?.bvn_masked },
+      { id: "ADDRESS", title: "Proof of address", description: "A recent utility bill or bank statement.", done: !!s?.poa_type && !!s?.has_poa },
+      { id: "SELFIE", title: "Selfie photo", description: "A clear photo of your face.", done: !!s?.has_selfie },
+    ];
+    if (status === "VERIFIED" || status === "PENDING_REVIEW") {
+      return defs.map((d) => ({ id: d.id, title: d.title, description: d.description, state: "complete" as const }));
+    }
+    let currentSet = false;
+    return defs.map(({ done, ...d }) => {
+      if (done) return { ...d, state: "complete" as const };
+      if (!currentSet) {
+        currentSet = true;
+        return { ...d, state: status === "REJECTED" ? ("action_required" as const) : ("current" as const) };
+      }
+      return { ...d, state: "upcoming" as const };
+    });
+  };
+
+  const KYC_UNLOCKS = ["Withdrawals to your saved bank accounts", "A complete investor profile"];
+
+  const fetchKyc = async (): Promise<KycSummary> => {
+    const { data, error } = await client.rpc("kyc_get_own");
+    if (error) throw investmentError(error);
+    const own = data as RawKycOwn;
+    const s = own.submission;
+    const status = KYC_STATUS[own.status] ?? "NOT_STARTED";
+    const submission: KycSubmissionSummary | null = s
+      ? {
+          id: s.id,
+          attemptNo: s.attempt_no,
+          status: s.status,
+          fullLegalName: s.full_legal_name,
+          gender: s.gender,
+          bvnMasked: s.bvn_masked,
+          poaType: s.poa_type,
+          hasSelfie: s.has_selfie,
+          hasPoa: s.has_poa,
+          provider: s.provider,
+          submittedAt: s.submitted_at,
+          reviewedAt: s.reviewed_at,
+          rejectionReason: s.rejection_reason,
+        }
+      : null;
+    return {
+      status,
+      tier: status === "VERIFIED" ? 2 : 1,
+      steps: kycSteps(status, s),
+      submittedAt: s?.submitted_at ?? null,
+      reviewedAt: s?.reviewed_at ?? null,
+      rejectionReason: s?.rejection_reason ?? undefined,
+      unlocks: KYC_UNLOCKS,
+      submission,
+    };
+  };
+
+  /** The open (non-superseded) submission, or null. */
+  const fetchKycOwn = async (): Promise<RawKycOwn> => {
+    const { data, error } = await client.rpc("kyc_get_own");
+    if (error) throw investmentError(error);
+    return data as RawKycOwn;
+  };
+
   return {
     auth,
 
@@ -601,8 +942,60 @@ export function createSupabaseInvestorDataSource(
     // ── profile — real auth fields over the mock shell ──────────────────────
     getProfile: fetchInvestorProfile,
 
-    // ── domains still delegated (no real tables yet) ────────────────────────
-    getKyc: () => domain.getKyc(),
+    // ── KYC — real (Phase 8B): draft → documents → submit → manual review ────
+    getKyc: () => hasSession().then((ok) => (ok ? fetchKyc() : domain.getKyc())),
+    async saveKycDraft(input: KycDraftInput): Promise<KycSummary> {
+      if (!(await hasSession())) return domain.saveKycDraft(input);
+      const { error } = await client.rpc("kyc_save_draft", {
+        p_full_legal_name: input.fullLegalName ?? null,
+        p_gender: input.gender ?? null,
+        p_bvn: input.bvn ?? null,
+        p_poa_type: input.poaType ?? null,
+      });
+      if (error) throw investmentError(error);
+      return fetchKyc();
+    },
+    async uploadKycDocument(kind: KycDocumentKind, file: Blob, fileName?: string): Promise<KycSummary> {
+      if (!(await hasSession())) return domain.uploadKycDocument(kind, file, fileName);
+      const own = await fetchKycOwn();
+      const sub = own.submission;
+      if (!sub || sub.status !== "DRAFT") {
+        throw new Error("Save your details first — documents attach to an open draft.");
+      }
+      const {
+        data: { user },
+      } = await client.auth.getUser();
+      if (!user) throw new Error("Sign in to continue.");
+      const ext = (fileName?.split(".").pop() ?? "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+      const docName = kind === "SELFIE" ? "selfie" : "poa";
+      const path = `${user.id}/${sub.id}/${docName}.${ext}`;
+      const { error: upErr } = await client.storage.from("kyc-documents").upload(path, file, { upsert: true });
+      if (upErr) throw investmentError(upErr);
+      const { error } = await client.rpc("kyc_save_draft", {
+        [kind === "SELFIE" ? "p_selfie_path" : "p_poa_path"]: path,
+      });
+      if (error) throw investmentError(error);
+      return fetchKyc();
+    },
+    async submitKyc(): Promise<KycSummary> {
+      if (!(await hasSession())) return domain.submitKyc();
+      const own = await fetchKycOwn();
+      if (!own.submission) throw new Error("Start your verification first.");
+      const { error } = await client.rpc("kyc_submit", { p_submission_id: own.submission.id });
+      if (error) throw investmentError(error);
+      return fetchKyc();
+    },
+    async setTransactionPin(pin: string): Promise<void> {
+      if (!(await hasSession())) return domain.setTransactionPin(pin);
+      const { error } = await client.rpc("set_transaction_pin", { p_pin: pin });
+      if (error) throw investmentError(error);
+    },
+    async hasTransactionPin(): Promise<boolean> {
+      if (!(await hasSession())) return domain.hasTransactionPin();
+      const { data, error } = await client.rpc("quote_withdrawal", { p_amount_minor: 0 });
+      if (error) throw investmentError(error);
+      return !!(data as RawWithdrawalQuote | null)?.pin_set;
+    },
 
     // ── dashboard — composed from real reads over the mock shell ────────────
     async getDashboard(): Promise<DashboardSummary> {
@@ -841,10 +1234,65 @@ export function createSupabaseInvestorDataSource(
       };
       return intent;
     },
-    quoteWithdrawal: (amount, destinationId) => domain.quoteWithdrawal(amount, destinationId),
-    requestWithdrawal: (input) => domain.requestWithdrawal(input),
-    getWithdrawal: (id) => domain.getWithdrawal(id),
-    listWithdrawals: () => domain.listWithdrawals(),
+    // ── withdrawals — real (Phase 8B): server quote, PIN + KYC gates ─────────
+    quoteWithdrawal: (amount, destinationId) =>
+      hasSession().then((ok) => (ok ? fetchWithdrawalQuote(amount, destinationId) : domain.quoteWithdrawal(amount, destinationId))),
+    async requestWithdrawal(input) {
+      if (!(await hasSession())) return domain.requestWithdrawal(input);
+      const { data, error } = await client.rpc("request_withdrawal", {
+        p_amount_minor: input.amount,
+        p_destination: null,
+        p_idempotency_key: input.idempotencyKey,
+        p_pin: input.pin,
+        p_bank_account_id: input.destinationId,
+      });
+      if (error) throw investmentError(error);
+      const row = data as RawWithdrawalRow;
+      const fresh = await fetchWithdrawal(row.id);
+      if (fresh) return fresh;
+      return mapWithdrawal(row, [
+        {
+          id: 0,
+          withdrawal_id: row.id,
+          from_status: null,
+          to_status: "REQUESTED",
+          source: "USER",
+          note: "withdrawal requested",
+          created_at: row.requested_at,
+        },
+      ]);
+    },
+    getWithdrawal: (id) => hasSession().then((ok) => (ok ? fetchWithdrawal(id) : domain.getWithdrawal(id))),
+    async listWithdrawals(): Promise<Withdrawal[]> {
+      if (!(await hasSession())) return domain.listWithdrawals();
+      const { data, error } = await client.from("withdrawals").select(WD_SELECT).order("requested_at", { ascending: false });
+      if (error) throw investmentError(error);
+      const rows = (data ?? []) as unknown as RawWithdrawalRow[];
+      const events = await fetchWithdrawalEvents(rows.map((r) => r.id));
+      return rows.map((r) => mapWithdrawal(r, events.get(r.id) ?? []));
+    },
+    async saveBankAccount(input: BankAccountInput): Promise<PayoutMethod> {
+      if (!(await hasSession())) return domain.saveBankAccount(input);
+      const { data, error } = await client.rpc("save_bank_account", {
+        p_bank_name: input.bankName,
+        p_bank_code: input.bankCode,
+        p_account_number: input.accountNumber,
+        p_account_name: input.accountName,
+        p_make_default: input.makeDefault ?? false,
+      });
+      if (error) throw investmentError(error);
+      return mapPayoutMethod(data as RawBankAccount);
+    },
+    async archiveBankAccount(id: string): Promise<void> {
+      if (!(await hasSession())) return domain.archiveBankAccount(id);
+      const { error } = await client.rpc("archive_bank_account", { p_id: id });
+      if (error) throw investmentError(error);
+    },
+    async setDefaultBankAccount(id: string): Promise<void> {
+      if (!(await hasSession())) return domain.setDefaultBankAccount(id);
+      const { error } = await client.rpc("set_default_bank_account", { p_id: id });
+      if (error) throw investmentError(error);
+    },
     getReferralSummary: () => domain.getReferralSummary(),
     listReferrals: () => domain.listReferrals(),
     listNotifications: () => domain.listNotifications(),

@@ -81,7 +81,7 @@ function WithdrawalsList() {
     <div>
       <PageHeader
         title="Withdrawal review"
-        description="Review queue — requests awaiting a decision first. Approve/reject/mark paid on the detail screen."
+        description="Review queue — requests awaiting a decision first. Approve/reject/mark paid on the detail screen. Funds stay reserved until a decision."
       />
       <FilterBar query={query} onQueryChange={(v) => { setQuery(v); setPage(1); }} placeholder="Search reference, user, destination…">
         <FilterSelect

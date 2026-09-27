@@ -305,6 +305,14 @@ export interface KycCheck {
   detail: string;
 }
 
+export interface AdminKycEvent {
+  from: string | null;
+  to: string;
+  source: string;
+  note: string | null;
+  at: ISODateString;
+}
+
 export interface AdminKycCase {
   id: string;
   userId: string;
@@ -322,6 +330,16 @@ export interface AdminKycCase {
   decisionNote: string | null;
   /** How long the case has been waiting, server-formatted. */
   ageLabel: string;
+  // ── Detail-only fields (present on getKycCase, absent on list rows) ──
+  attemptNo?: number;
+  legalName?: string | null;
+  gender?: string | null;
+  /** Full BVN for reviewer roles, masked for other ops readers; null when absent. */
+  bvn?: string | null;
+  poaType?: string | null;
+  hasSelfie?: boolean;
+  hasPoa?: boolean;
+  events?: AdminKycEvent[];
 }
 
 export interface KycFilter extends PageRequest {
@@ -532,6 +550,24 @@ export interface AdminWithdrawalRow {
   reviewedBy: string | null;
   reviewedAt: ISODateString | null;
   paidAt: ISODateString | null;
+  // ── Detail-only fields (present on getWithdrawal) ──
+  /** Immutable per-request destination snapshot. */
+  destination?: {
+    bankName?: string;
+    bankCode?: string;
+    accountNumber?: string;
+    accountName?: string;
+    bankAccountId?: string;
+  } | null;
+  events?: Array<{ from: string | null; to: string; source: string; note: string | null; at: ISODateString }>;
+  /** Outbound webhook/outbox deliveries (Make.com → Telegram). */
+  outbound?: Array<{
+    eventType: string;
+    status: string;
+    attempts: number;
+    deliveredAt: ISODateString | null;
+    lastResponseCode: number | null;
+  }>;
 }
 
 export interface WithdrawalDecisionInput extends AdminActionInput {
@@ -742,6 +778,12 @@ export interface AdminDataSource {
   getUser(id: string): Promise<AdminUserDetail | null>;
   setUserStatus(input: AdminActionInput & { userId: string; status: AccountStatus }): Promise<AdminActionResult>;
 
+  /** Short-lived signed URL for a private KYC document (owner/reviewer authorized server-side). */
+  getKycDocumentUrl(submissionId: string, kind: "selfie" | "poa"): Promise<string>;
+  /** Detection-only integrity checks for the payout ledger (orphan holds, fee cap…). */
+  reconcileWithdrawals(): Promise<InvestmentReconciliationItem[]>;
+  /** Detection-only integrity checks for the KYC pipeline (orphaned submissions, missing objects…). */
+  reconcileKyc(): Promise<InvestmentReconciliationItem[]>;
   listKycCases(filter?: KycFilter): Promise<Page<AdminKycCase>>;
   getKycCase(id: string): Promise<AdminKycCase | null>;
   decideKyc(input: KycDecisionInput): Promise<AdminActionResult>;

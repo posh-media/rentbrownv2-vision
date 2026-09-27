@@ -184,3 +184,48 @@ Approved D-7.1–D-7.15:
 Status: accepted · implemented in Phase 7B — see
 docs/phases/PHASE_7B_IMPLEMENTATION_REPORT.md · Scope: `0016–0017`,
 `maturity-worker` Edge Function, reconciliation + admin extensions.
+
+## D-008 KYC + manual withdrawals (APPROVED — Phase 8A, implemented in 8B)
+
+Phase 8A proposal: docs/phases/PHASE_8A_KYC_WITHDRAWALS_ARCHITECTURE.md.
+Approved D-8.1–D-8.11 plus the first-withdrawal KYC exception:
+
+- **D-8.1** Versioned `kyc_submissions` (append-per-attempt) + `kyc_events`;
+  one live submission per user via partial unique index; rejected attempts
+  go `SUPERSEDED` on resubmission.
+- **D-8.2** `UNDER_REVIEW` retained as the reviewer-claim step;
+  `DRAFT → SUBMITTED → UNDER_REVIEW → VERIFIED|REJECTED` governed by
+  `apply_kyc_transition`. `NOT_STARTED` stays virtual.
+- **D-8.3** BVN in a restricted column — masked (`***last4`) in all
+  investor responses; full value only via reviewer-gated admin RPC.
+- **D-8.4** `withdrawal.min_mode` = `DYNAMIC` default: minimum =
+  `floor(slot_price_minor * (10000 + roi_bps) / 10000)` of the cheapest
+  PUBLISHED plan; `withdrawal.min_minor.<cur>` is the FIXED-mode value and
+  empty-catalogue fallback.
+- **D-8.5** `user_bank_accounts` saved beneficiaries; `withdrawals.destination`
+  remains the immutable per-withdrawal snapshot.
+- **D-8.6** VERIFIED is terminal; re-verification requires admin action and
+  is deferred to Phase 9 ops tooling.
+- **D-8.7** Transaction PIN gates withdrawals only (checkout PIN deferred);
+  `user_pins` stores bcrypt (`pgcrypto crypt`) only, failed-attempt counter,
+  time-boxed lockout; no client SELECT.
+- **D-8.8** Lost-PIN recovery deferred to Phase 9.
+- **D-8.9** `withdrawal.completed` + `withdrawal.rejected` durable outbox
+  events added transactionally inside `decide_withdrawal`.
+- **D-8.10** Migrations `0018`/`0019`/`0020` + `kyc-document-url` Edge
+  Function; no new journal types or system accounts.
+- **D-8.11** No KYC auto-purge in 8B; retention policy deferred.
+- **D-8.12** First-withdrawal KYC exception: a user with zero prior
+  `withdrawals` rows may withdraw without verified KYC iff
+  `amount < withdrawal.first_without_kyc_max_minor.<currency>`
+  (strictly less; NGN 1,000,000 / USD 1,000 seeded). "First-ever" means no
+  prior withdrawal record of ANY status — declined/failed attempts consume
+  it. Enforced atomically under a per-user advisory lock.
+- **D-8.13** Private `kyc-documents` bucket; objects at
+  `<user_id>/<submission_id>/<kind>.<ext>`; owner writes only while the
+  submission is DRAFT; reviewer reads via RBAC storage policy; signed URLs
+  minted by the role-checked `kyc-document-url` Edge Function.
+
+Status: accepted · implemented in Phase 8B — see
+docs/phases/PHASE_8B_IMPLEMENTATION_REPORT.md · Scope: `0018–0020`,
+`kyc-document-url` Edge Function, investor/admin KYC + withdrawal wiring.

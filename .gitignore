@@ -17,3 +17,4 @@ next-env.d.ts
 
 # Supabase CLI artifacts
 supabase/.temp/
+.verify-p7-state.json

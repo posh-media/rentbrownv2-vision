@@ -5,20 +5,28 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Button,
+  Checkbox,
   DataRow,
+  Field,
+  Input,
   MoneyFigure,
   MoneyInput,
+  Select,
   StatePanel,
   Stepper,
   StatusPill,
   cn,
+  toast,
 } from "@rentbrown/ui";
-import { Landmark } from "lucide-react";
-import type { MinorUnits } from "@rentbrown/types";
+import { Landmark, Star, Trash2 } from "lucide-react";
+import type { MinorUnits, PayoutMethod } from "@rentbrown/types";
 import { formatMoney, idempotencyKey } from "@rentbrown/utils";
 
 import {
+  useArchiveBankAccount,
   useRequestWithdrawal,
+  useSaveBankAccount,
+  useSetDefaultBankAccount,
   useWallet,
   useWithdrawalQuote,
 } from "../../../../lib/data/hooks";
@@ -33,6 +41,34 @@ const FRACTIONS = [
   { label: "Max", f: 1 },
 ];
 
+/** Common Nigerian banks — name + CBN code. "Other" allows a manual entry. */
+const BANKS: Array<{ name: string; code: string }> = [
+  { name: "Access Bank", code: "044" },
+  { name: "Citibank Nigeria", code: "023" },
+  { name: "Ecobank Nigeria", code: "050" },
+  { name: "Fidelity Bank", code: "070" },
+  { name: "First Bank of Nigeria", code: "011" },
+  { name: "FCMB", code: "214" },
+  { name: "Globus Bank", code: "103" },
+  { name: "GTBank", code: "058" },
+  { name: "Heritage Bank", code: "030" },
+  { name: "Jaiz Bank", code: "301" },
+  { name: "Keystone Bank", code: "082" },
+  { name: "Kuda Microfinance", code: "50211" },
+  { name: "Moniepoint MFB", code: "50515" },
+  { name: "OPay", code: "999992" },
+  { name: "PalmPay", code: "999991" },
+  { name: "Polaris Bank", code: "076" },
+  { name: "Providus Bank", code: "101" },
+  { name: "Stanbic IBTC", code: "221" },
+  { name: "Sterling Bank", code: "232" },
+  { name: "Union Bank", code: "032" },
+  { name: "United Bank for Africa", code: "033" },
+  { name: "Unity Bank", code: "215" },
+  { name: "Wema Bank", code: "035" },
+  { name: "Zenith Bank", code: "057" },
+];
+
 export default function WithdrawPage() {
   const session = useRequireSession();
   const wallet = useWallet();
@@ -44,8 +80,20 @@ export default function WithdrawPage() {
   const [pinOpen, setPinOpen] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  const [addingBank, setAddingBank] = React.useState(false);
+  const [bankChoice, setBankChoice] = React.useState(BANKS[0]!.name);
+  const [bankName, setBankName] = React.useState("");
+  const [bankCode, setBankCode] = React.useState("");
+  const [accountNumber, setAccountNumber] = React.useState("");
+  const [accountName, setAccountName] = React.useState("");
+  const [makeDefault, setMakeDefault] = React.useState(false);
+  const [bankError, setBankError] = React.useState<string | null>(null);
+
   const quote = useWithdrawalQuote(amount, destinationId ?? undefined);
   const requestWithdrawal = useRequestWithdrawal();
+  const saveBank = useSaveBankAccount();
+  const archiveBank = useArchiveBankAccount();
+  const setDefaultBank = useSetDefaultBankAccount();
 
   if (session.isPending || wallet.isPending) return <PageSkeleton />;
   if (wallet.isError) {
@@ -71,7 +119,7 @@ export default function WithdrawPage() {
   const kycBlocked = q?.blockedReason?.toLowerCase().includes("identity") ?? false;
   const pinBlocked = q?.blockedReason?.toLowerCase().includes("pin") ?? false;
 
-  const submit = async () => {
+  const submit = async (pin: string) => {
     if (amount === null || !destination) return;
     setPinOpen(false);
     setError(null);
@@ -79,11 +127,68 @@ export default function WithdrawPage() {
       const wd = await requestWithdrawal.mutateAsync({
         amount,
         destinationId: destination.id,
+        pin,
         idempotencyKey: idempotencyKey(),
       });
       router.push(`/wallet/withdrawals/${wd.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "The withdrawal could not be submitted.");
+    }
+  };
+
+  const isOtherBank = bankChoice === "Other";
+  const chosenBank = BANKS.find((b) => b.name === bankChoice);
+
+  const saveBankAccount = async () => {
+    setBankError(null);
+    const name = isOtherBank ? bankName.trim() : (chosenBank?.name ?? "");
+    const code = isOtherBank ? bankCode.trim() : (chosenBank?.code ?? "");
+    if (!name || !code) {
+      setBankError("Choose a bank.");
+      return;
+    }
+    if (!/^\d{6,20}$/.test(accountNumber)) {
+      setBankError("Account numbers are 6–20 digits.");
+      return;
+    }
+    if (accountName.trim().length < 3) {
+      setBankError("Enter the account name exactly as the bank has it.");
+      return;
+    }
+    try {
+      const saved = await saveBank.mutateAsync({
+        bankName: name,
+        bankCode: code,
+        accountNumber,
+        accountName: accountName.trim(),
+        makeDefault,
+      });
+      setDestinationId(saved.id);
+      setAddingBank(false);
+      setAccountNumber("");
+      setAccountName("");
+      toast.success("Bank account saved");
+    } catch (e) {
+      setBankError(e instanceof Error ? e.message : "Couldn't save the account — try again.");
+    }
+  };
+
+  const archive = async (m: PayoutMethod) => {
+    try {
+      await archiveBank.mutateAsync(m.id);
+      if (destinationId === m.id) setDestinationId(null);
+      toast.success(`${m.bankName} ${m.accountNumberMasked} removed`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't remove the account.");
+    }
+  };
+
+  const makeDefaultFn = async (m: PayoutMethod) => {
+    try {
+      await setDefaultBank.mutateAsync(m.id);
+      toast.success(`${m.bankName} is now your default`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't update the default account.");
     }
   };
 
@@ -102,6 +207,11 @@ export default function WithdrawPage() {
               <div className="mt-4">
                 <MoneyInput value={amount} onValueChange={setAmount} aria-label="Withdrawal amount" className="h-14 text-lg" autoFocus />
               </div>
+              {q && q.minAmount > 0 ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Minimum withdrawal {formatMoney(q.minAmount, q.currency)}
+                </p>
+              ) : null}
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {FRACTIONS.map((f) => (
                   <button
@@ -168,14 +278,20 @@ export default function WithdrawPage() {
                 {methods.map((m) => {
                   const selected = destination?.id === m.id;
                   return (
-                    <button
+                    <div
                       key={m.id}
-                      type="button"
                       role="radio"
                       aria-checked={selected}
+                      tabIndex={0}
                       onClick={() => setDestinationId(m.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setDestinationId(m.id);
+                        }
+                      }}
                       className={cn(
-                        "flex min-h-11 items-center gap-3 rounded-lg border p-4 text-left transition-colors",
+                        "flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border p-4 text-left transition-colors",
                         selected ? "border-primary bg-accent" : "border-border hover:bg-surface-subtle",
                       )}
                     >
@@ -188,21 +304,106 @@ export default function WithdrawPage() {
                           {m.accountName} · {m.accountNumberMasked}
                         </span>
                       </span>
-                      <span className="flex shrink-0 gap-1.5">
-                        {m.isDefault ? <StatusPill tone="info">Default</StatusPill> : null}
+                      <span className="flex shrink-0 items-center gap-1.5">
+                        {m.isDefault ? (
+                          <StatusPill tone="info">Default</StatusPill>
+                        ) : (
+                          <button
+                            type="button"
+                            title="Make default"
+                            aria-label={`Make ${m.bankName} ${m.accountNumberMasked} default`}
+                            disabled={setDefaultBank.isPending}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void makeDefaultFn(m);
+                            }}
+                            className="rounded-md p-1.5 text-tertiary hover:bg-surface-subtle hover:text-foreground"
+                          >
+                            <Star className="size-3.5" aria-hidden />
+                          </button>
+                        )}
                         {m.verified ? <StatusPill tone="success">Verified</StatusPill> : null}
+                        <button
+                          type="button"
+                          title="Remove account"
+                          aria-label={`Remove ${m.bankName} ${m.accountNumberMasked}`}
+                          disabled={archiveBank.isPending}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void archive(m);
+                          }}
+                          className="rounded-md p-1.5 text-tertiary hover:bg-surface-subtle hover:text-error"
+                        >
+                          <Trash2 className="size-3.5" aria-hidden />
+                        </button>
                       </span>
-                    </button>
+                    </div>
                   );
                 })}
+                {methods.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                    No saved accounts yet — add the bank account your payout should go to.
+                  </p>
+                ) : null}
                 <button
                   type="button"
-                  disabled
-                  className="flex min-h-11 cursor-not-allowed items-center gap-3 rounded-lg border border-dashed border-border p-4 text-left opacity-60"
+                  onClick={() => setAddingBank((v) => !v)}
+                  className="flex min-h-11 items-center gap-3 rounded-lg border border-dashed border-border p-4 text-left hover:bg-surface-subtle"
                 >
-                  <span className="text-sm font-semibold text-muted-foreground">Add new bank account</span>
-                  <span className="ml-auto text-xs text-muted-foreground">Available after verification in a later phase</span>
+                  <span className="text-sm font-semibold text-muted-foreground">
+                    {addingBank ? "Close bank form" : "Add new bank account"}
+                  </span>
                 </button>
+
+                {addingBank ? (
+                  <div className="flex flex-col gap-3 rounded-lg border border-border p-4">
+                    {bankError ? <StatePanel tone="error" title="Couldn't save" copy={bankError} /> : null}
+                    <Field label="Bank" htmlFor="wd-bank">
+                      <Select id="wd-bank" value={bankChoice} onChange={(e) => setBankChoice(e.target.value)}>
+                        {BANKS.map((b) => (
+                          <option key={b.code} value={b.name}>
+                            {b.name}
+                          </option>
+                        ))}
+                        <option value="Other">Other bank</option>
+                      </Select>
+                    </Field>
+                    {isOtherBank ? (
+                      <div className="grid grid-cols-2 gap-3">
+                        <Field label="Bank name" htmlFor="wd-bank-name">
+                          <Input id="wd-bank-name" value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="e.g. Titan Trust Bank" />
+                        </Field>
+                        <Field label="Bank code" htmlFor="wd-bank-code">
+                          <Input id="wd-bank-code" value={bankCode} onChange={(e) => setBankCode(e.target.value)} placeholder="CBN code" />
+                        </Field>
+                      </div>
+                    ) : null}
+                    <Field label="Account number" htmlFor="wd-acct">
+                      <Input
+                        id="wd-acct"
+                        inputMode="numeric"
+                        value={accountNumber}
+                        onChange={(e) => setAccountNumber(e.target.value.replace(/\D/g, "").slice(0, 20))}
+                        placeholder="10-digit NUBAN"
+                      />
+                    </Field>
+                    <Field label="Account name" htmlFor="wd-acct-name">
+                      <Input
+                        id="wd-acct-name"
+                        value={accountName}
+                        onChange={(e) => setAccountName(e.target.value)}
+                        placeholder="Exactly as registered with the bank"
+                      />
+                    </Field>
+                    <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Checkbox checked={makeDefault} onCheckedChange={(v) => setMakeDefault(v === true)} />
+                      Make this my default account
+                    </label>
+                    <Button size="sm" className="self-start" disabled={saveBank.isPending} onClick={() => void saveBankAccount()}>
+                      {saveBank.isPending ? "Saving…" : "Save account"}
+                    </Button>
+                  </div>
+                ) : null}
               </div>
               <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row">
                 <Button variant="outline" onClick={() => setStep(0)} className="sm:w-auto">
@@ -261,7 +462,7 @@ export default function WithdrawPage() {
         currency={w.currency}
         destination={destination ? `${destination.bankName} ${destination.accountNumberMasked}` : "your bank account"}
         loading={requestWithdrawal.isPending}
-        onConfirm={() => void submit()}
+        onConfirm={(pin) => void submit(pin)}
       />
     </div>
   );

@@ -402,6 +402,13 @@ export interface WithdrawalQuote {
   /** Present when not eligible: insufficient balance, below minimum, KYC required, no PIN… */
   blockedReason?: string;
   estimatedArrival: string;
+  /** Server-authoritative extras (Phase 8B real quote; absent on the mock path). */
+  feeBps?: BasisPoints;
+  feeCap?: MinorUnits;
+  available?: MinorUnits;
+  kycRequired?: boolean;
+  kycExempt?: boolean;
+  pinSet?: boolean;
 }
 
 export interface Withdrawal {
@@ -492,6 +499,30 @@ export interface KycStep {
   state: "complete" | "current" | "upcoming" | "action_required";
 }
 
+export type KycGender = "MALE" | "FEMALE" | "OTHER";
+
+export type KycPoaType = "UTILITY_BILL" | "ELECTRICITY_BILL" | "BANK_STATEMENT" | "OTHER";
+
+export type KycDocumentKind = "SELFIE" | "POA";
+
+/** The live (non-superseded) submission as the server reports it. */
+export interface KycSubmissionSummary {
+  id: string;
+  attemptNo: number;
+  status: "DRAFT" | "SUBMITTED" | "UNDER_REVIEW" | "VERIFIED" | "REJECTED";
+  fullLegalName: string | null;
+  gender: KycGender | null;
+  /** Server-masked ("***1234") — the raw BVN is never returned to clients. */
+  bvnMasked: string | null;
+  poaType: KycPoaType | null;
+  hasSelfie: boolean;
+  hasPoa: boolean;
+  provider: string;
+  submittedAt: ISODateString | null;
+  reviewedAt: ISODateString | null;
+  rejectionReason: string | null;
+}
+
 export interface KycSummary {
   status: KycStatus;
   tier: number;
@@ -500,6 +531,27 @@ export interface KycSummary {
   reviewedAt: ISODateString | null;
   rejectionReason?: string;
   unlocks: string[];
+  /** Present on the real (Supabase) path once a submission exists. */
+  submission?: KycSubmissionSummary | null;
+}
+
+/** Investor-authored KYC draft fields; documents upload separately. */
+export interface KycDraftInput {
+  fullLegalName?: string;
+  gender?: KycGender;
+  /** 11 digits. Only ever sent to the server — masked on the way back. */
+  bvn?: string;
+  poaType?: KycPoaType;
+}
+
+/** A saved withdrawal beneficiary (bank account) as the investor types it. */
+export interface BankAccountInput {
+  bankName: string;
+  bankCode: string;
+  /** 6–20 digits. */
+  accountNumber: string;
+  accountName: string;
+  makeDefault?: boolean;
 }
 
 // ── Notifications ────────────────────────────────────────────────────────────
@@ -783,7 +835,10 @@ export interface CreateDepositInput {
 
 export interface RequestWithdrawalInput {
   amount: MinorUnits;
+  /** Saved bank-account id (user_bank_accounts). */
   destinationId: string;
+  /** 6-digit transaction PIN — verified server-side; never persisted client-side. */
+  pin: string;
   idempotencyKey: string;
 }
 
@@ -803,6 +858,16 @@ export interface InvestorDataSource {
   // profile & account
   getProfile(): Promise<UserProfile>;
   getKyc(): Promise<KycSummary>;
+  /** Create/update the open KYC draft; on REJECTED this starts a new attempt. */
+  saveKycDraft(input: KycDraftInput): Promise<KycSummary>;
+  /** Upload a document into private storage and link it to the open draft. */
+  uploadKycDocument(kind: KycDocumentKind, file: Blob, fileName?: string): Promise<KycSummary>;
+  /** Move the complete draft to PENDING_REVIEW. */
+  submitKyc(): Promise<KycSummary>;
+  /** Set/replace the 6-digit transaction PIN (server-hashed). */
+  setTransactionPin(pin: string): Promise<void>;
+  /** Whether a transaction PIN exists — used by the security surface. */
+  hasTransactionPin(): Promise<boolean>;
 
   // home
   getDashboard(): Promise<DashboardSummary>;
@@ -831,6 +896,10 @@ export interface InvestorDataSource {
   requestWithdrawal(input: RequestWithdrawalInput): Promise<Withdrawal>;
   getWithdrawal(id: string): Promise<Withdrawal | null>;
   listWithdrawals(): Promise<Withdrawal[]>;
+  /** Save a withdrawal beneficiary; returns it as a PayoutMethod. */
+  saveBankAccount(input: BankAccountInput): Promise<PayoutMethod>;
+  archiveBankAccount(id: string): Promise<void>;
+  setDefaultBankAccount(id: string): Promise<void>;
 
   // referrals
   getReferralSummary(): Promise<ReferralSummary>;

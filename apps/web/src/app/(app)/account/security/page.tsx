@@ -21,7 +21,7 @@ import { Monitor, Smartphone } from "lucide-react";
 import { formatDateTime, formatRelativeDays } from "@rentbrown/utils";
 import { MOCK_NOW } from "@rentbrown/mock-data";
 
-import { useProfile } from "../../../../lib/data/hooks";
+import { usePinStatus, useProfile, useSetTransactionPin } from "../../../../lib/data/hooks";
 import { useAuth } from "../../../../lib/data/provider";
 import { useRequireSession } from "../../../../lib/session";
 import { PageHeader } from "../../../../components/layout/page-header";
@@ -35,10 +35,30 @@ export default function SecurityPage() {
   const [pwOpen, setPwOpen] = React.useState(false);
   const [pin1, setPin1] = React.useState("");
   const [pin2, setPin2] = React.useState("");
+  const [pinError, setPinError] = React.useState<string | null>(null);
   const [pw1, setPw1] = React.useState("");
   const [pw2, setPw2] = React.useState("");
   const [pwBusy, setPwBusy] = React.useState(false);
   const [pwError, setPwError] = React.useState<string | null>(null);
+  const pinStatus = usePinStatus();
+  const setPin = useSetTransactionPin();
+
+  const submitPin = async () => {
+    setPinError(null);
+    if (pin1.length !== 6 || pin1 !== pin2) {
+      setPinError("Enter the same 6 digits twice.");
+      return;
+    }
+    try {
+      await setPin.mutateAsync(pin1);
+      setPinOpen(false);
+      setPin1("");
+      setPin2("");
+      toast.success("Transaction PIN saved");
+    } catch (e) {
+      setPinError(e instanceof Error ? e.message : "Couldn't save the PIN — try again.");
+    }
+  };
 
   const submitPassword = async () => {
     setPwError(null);
@@ -86,6 +106,9 @@ export default function SecurityPage() {
 
   const p = profile.data;
   const sec = p.security;
+  // Server-truth PIN status when available; falls back to the profile fixture
+  // on the unauthenticated demo path.
+  const hasPin = pinStatus.data ?? sec.hasTransactionPin;
 
   const platformIcon = (platform: string) =>
     platform === "Web" ? <Monitor className="size-4" aria-hidden /> : <Smartphone className="size-4" aria-hidden />;
@@ -100,11 +123,11 @@ export default function SecurityPage() {
           <p className="mt-0.5 text-xs text-muted-foreground">Confirms investments and withdrawals.</p>
         </div>
         <div className="flex items-center gap-2">
-          <StatusPill tone={sec.hasTransactionPin ? "success" : "warning"}>
-            {sec.hasTransactionPin ? "Set" : "Not set"}
+          <StatusPill tone={hasPin ? "success" : "warning"}>
+            {hasPin ? "Set" : "Not set"}
           </StatusPill>
           <Button variant="outline" size="sm" onClick={() => setPinOpen(true)}>
-            {sec.hasTransactionPin ? "Change PIN" : "Set PIN"}
+            {hasPin ? "Change PIN" : "Set PIN"}
           </Button>
         </div>
       </div>
@@ -168,10 +191,11 @@ export default function SecurityPage() {
       <Dialog open={pinOpen} onOpenChange={setPinOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{sec.hasTransactionPin ? "Change transaction PIN" : "Set transaction PIN"}</DialogTitle>
-            <DialogDescription>Enter a 6-digit PIN, then confirm it.</DialogDescription>
+            <DialogTitle>{hasPin ? "Change transaction PIN" : "Set transaction PIN"}</DialogTitle>
+            <DialogDescription>Enter a 6-digit PIN, then confirm it. It protects withdrawals and other sensitive actions.</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4">
+            {pinError ? <StatePanel tone="error" title="Couldn't save PIN" copy={pinError} /> : null}
             <PinInput value={pin1} onChange={setPin1} label="New PIN" />
             <PinInput value={pin2} onChange={setPin2} label="Confirm PIN" />
           </div>
@@ -179,16 +203,8 @@ export default function SecurityPage() {
             <Button variant="ghost" onClick={() => setPinOpen(false)}>
               Cancel
             </Button>
-            <Button
-              disabled={pin1.length !== 6 || pin1 !== pin2}
-              onClick={() => {
-                setPinOpen(false);
-                setPin1("");
-                setPin2("");
-                toast.success("Transaction PIN updated (prototype)");
-              }}
-            >
-              Save PIN
+            <Button disabled={setPin.isPending || pin1.length !== 6 || pin1 !== pin2} onClick={() => void submitPin()}>
+              {setPin.isPending ? "Saving…" : "Save PIN"}
             </Button>
           </DialogFooter>
         </DialogContent>

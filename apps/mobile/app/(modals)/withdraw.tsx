@@ -60,13 +60,13 @@ export default function Withdraw() {
     />
   ) : null;
 
-  const submit = async () => {
+  const submit = async (pin: string) => {
     if (!destinationId || !q?.eligible) return;
     try {
-      const wd = await request.mutateAsync({ amount, destinationId, idempotencyKey: idempotencyKey("wd") });
+      const wd = await request.mutateAsync({ amount, destinationId, pin, idempotencyKey: idempotencyKey("wd") });
       router.replace(`/(tabs)/wallet/withdrawals/${wd.id}`);
-    } catch {
-      toast("Could not submit — try again");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not submit — try again");
     }
   };
 
@@ -167,11 +167,13 @@ export default function Withdraw() {
                 </View>
               </Pressable>
             ))}
-            <View style={{ paddingHorizontal: 14, paddingVertical: 6 }}>
-              <Button variant="outline" size="sm" label="Add new bank account" disabled />
-              <Caption tone="muted" style={{ marginTop: 4 }}>
-                Available after verification in a later phase.
+            {(w?.payoutMethods.length ?? 0) === 0 ? (
+              <Caption tone="muted" style={{ paddingHorizontal: 14, paddingVertical: 8 }}>
+                No saved accounts yet — add a bank account on the web app first.
               </Caption>
+            ) : null}
+            <View style={{ paddingHorizontal: 14, paddingVertical: 6 }}>
+              <Caption tone="muted">Manage bank accounts on the RentBrown web app.</Caption>
             </View>
             <View style={{ flexDirection: "row", gap: 10, padding: 14 }}>
               <View style={{ flex: 1 }}>
@@ -220,9 +222,9 @@ export default function Withdraw() {
           <PinPad
             value={pin}
             onChange={setPin}
-            onComplete={() => {
+            onComplete={(value) => {
               setPinOpen(false);
-              void submit();
+              void submit(value);
             }}
           />
         </View>

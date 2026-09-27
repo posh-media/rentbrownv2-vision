@@ -89,15 +89,19 @@ export default function Kyc() {
 
           <Card style={{ backgroundColor: t.bg.subtle }}>
             <BodySm tone="muted">
-              Your information is requested only for identity and account-security purposes. This prototype does not upload or store documents.
+              Documents are stored privately and reviewed only by the RentBrown compliance team. Your
+              BVN is never shown back to you or to other users.
             </BodySm>
           </Card>
         </>
       )}
       <BottomSheet open={sheetOpen} onClose={() => setSheetOpen(false)}>
         <View style={{ gap: 10 }}>
-          <Body style={{ fontWeight: "800" }}>Verification opens in a later phase</Body>
-          <BodySm tone="muted">No documents are uploaded or stored in this prototype.</BodySm>
+          <Body style={{ fontWeight: "800" }}>Complete verification on the web app</Body>
+          <BodySm tone="muted">
+            Document capture lives on the RentBrown web app for now — your status here updates as soon
+            as it changes.
+          </BodySm>
           <Button variant="outline" label="Close" onPress={() => setSheetOpen(false)} />
         </View>
       </BottomSheet>

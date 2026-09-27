@@ -2,18 +2,7 @@
 
 import * as React from "react";
 import { AlertCircle, Check } from "lucide-react";
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  StatePanel,
-  StatusPill,
-  cn,
-} from "@rentbrown/ui";
+import { Button, StatePanel, StatusPill, cn } from "@rentbrown/ui";
 import type { KycStep, KycSummary } from "@rentbrown/types";
 import { formatDate } from "@rentbrown/utils";
 
@@ -53,9 +42,7 @@ function StepRow({ step }: { step: KycStep }) {
   );
 }
 
-export function KycStatusPanel({ kyc }: { kyc: KycSummary }) {
-  const [dialogOpen, setDialogOpen] = React.useState(false);
-
+export function KycStatusPanel({ kyc, onStart }: { kyc: KycSummary; onStart?: () => void }) {
   const panel = (() => {
     switch (kyc.status) {
       case "VERIFIED":
@@ -75,7 +62,7 @@ export function KycStatusPanel({ kyc }: { kyc: KycSummary }) {
           />
         );
       case "IN_PROGRESS":
-        return <StatePanel tone="info" title="Verification in progress" copy="Finish the remaining steps to unlock withdrawals." />;
+        return <StatePanel tone="info" title="Verification in progress" copy="Finish the remaining steps below and submit for review." />;
       case "REJECTED":
         return (
           <StatePanel
@@ -83,8 +70,8 @@ export function KycStatusPanel({ kyc }: { kyc: KycSummary }) {
             title="Action required"
             copy={kyc.rejectionReason ?? "One of your documents could not be accepted."}
             action={
-              <Button size="sm" onClick={() => setDialogOpen(true)}>
-                Upload a clearer document
+              <Button size="sm" onClick={onStart}>
+                Update &amp; resubmit
               </Button>
             }
           />
@@ -96,7 +83,7 @@ export function KycStatusPanel({ kyc }: { kyc: KycSummary }) {
             title="Not started"
             copy="Verification takes about five minutes and is required before withdrawals."
             action={
-              <Button size="sm" onClick={() => setDialogOpen(true)}>
+              <Button size="sm" onClick={onStart}>
                 Start verification
               </Button>
             }
@@ -128,24 +115,9 @@ export function KycStatusPanel({ kyc }: { kyc: KycSummary }) {
       </div>
 
       <p className="rounded-md bg-surface-subtle p-4 text-xs text-muted-foreground">
-        Your information is requested only for identity and account-security purposes. This prototype
-        does not upload or store documents.
+        Documents are stored privately and reviewed only by the RentBrown compliance team. Your BVN is
+        never shown back to you or to other users.
       </p>
-
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Verification opens in a later phase</DialogTitle>
-            <DialogDescription>
-              Document capture and review are not part of this prototype. The steps above show how the
-              flow will be structured.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button onClick={() => setDialogOpen(false)}>Got it</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

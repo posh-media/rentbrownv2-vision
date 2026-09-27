@@ -84,7 +84,7 @@ function WithdrawalDetail() {
               <p className="tabular mt-1 text-xl font-extrabold">{formatMoney(w.amount, w.currency)}</p>
             </div>
             <div className="financial-card p-4">
-              <p className="text-[10px] font-bold uppercase text-muted-foreground">Fee (5% cap ₦10,000)</p>
+              <p className="text-[10px] font-bold uppercase text-muted-foreground">Fee</p>
               <p className="tabular mt-1 text-xl font-extrabold">{formatMoney(w.fee, w.currency)}</p>
             </div>
             <div className="financial-card p-4">
@@ -109,6 +109,17 @@ function WithdrawalDetail() {
                 <DetailRow label="Paid at">{w.paidAt ? formatDateTime(w.paidAt) : "—"}</DetailRow>
               </div>
             </div>
+            {w.destination?.accountNumber || w.destination?.accountName ? (
+              <div className="mt-3 rounded-md border border-border p-3">
+                <p className="text-[10px] font-bold uppercase text-muted-foreground">Destination snapshot</p>
+                <div className="mt-1.5 grid grid-cols-1 gap-x-6 sm:grid-cols-2">
+                  <DetailRow label="Bank">{w.destination?.bankName ?? "—"}</DetailRow>
+                  <DetailRow label="Account" mono>{w.destination?.accountNumber ?? "—"}</DetailRow>
+                  <DetailRow label="Name">{w.destination?.accountName ?? "—"}</DetailRow>
+                  <DetailRow label="Code" mono>{w.destination?.bankCode ?? "—"}</DetailRow>
+                </div>
+              </div>
+            ) : null}
             {w.riskFlags.length > 0 ? (
               <div className="mt-3 rounded-md border border-warning-border bg-warning-soft p-3">
                 <p className="text-[10px] font-bold uppercase text-[var(--warning-fg)]">Risk flags</p>
@@ -120,6 +131,52 @@ function WithdrawalDetail() {
               </div>
             ) : null}
           </section>
+
+          {/* State transitions */}
+          {w.events && w.events.length > 0 ? (
+            <section className="financial-card p-4">
+              <h2 className="eyebrow mb-3 text-muted-foreground">Timeline</h2>
+              <div className="flex flex-col gap-2">
+                {w.events.map((e, i) => (
+                  <div key={i} className="flex items-start justify-between gap-3 rounded-md border border-border p-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">
+                        {e.from ? `${e.from.replace(/_/g, " ").toLowerCase()} → ` : ""}
+                        {e.to.replace(/_/g, " ").toLowerCase()}
+                      </p>
+                      {e.note ? <p className="mt-0.5 text-xs text-muted-foreground">{e.note}</p> : null}
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-[10px] font-bold uppercase text-tertiary">{e.source}</p>
+                      <p className="tabular text-xs text-muted-foreground">{formatDateTime(e.at)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {/* Outbound deliveries (Make.com → Telegram) */}
+          {w.outbound && w.outbound.length > 0 ? (
+            <section className="financial-card p-4">
+              <h2 className="eyebrow mb-3 text-muted-foreground">Outbound events</h2>
+              <div className="flex flex-col gap-2">
+                {w.outbound.map((o, i) => (
+                  <div key={i} className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
+                    <div className="min-w-0">
+                      <p className="font-mono text-xs font-semibold">{o.eventType}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        {o.attempts} attempt{o.attempts === 1 ? "" : "s"}
+                        {o.lastResponseCode ? ` · HTTP ${o.lastResponseCode}` : ""}
+                        {o.deliveredAt ? ` · delivered ${formatDateTime(o.deliveredAt)}` : ""}
+                      </p>
+                    </div>
+                    <StatusCell status={o.status} className="shrink-0" />
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
         </div>
 
         {/* Decision panel */}
@@ -153,7 +210,7 @@ function WithdrawalDetail() {
             </p>
           )}
           <p className="mt-4 border-t pt-3 text-[11px] text-tertiary">
-            Reserved funds stay in the user&rsquo;s RESERVED account until a decision is made (mock projection).
+            Reserved funds stay in the investor&rsquo;s RESERVED ledger account until a decision posts the release or payout journal.
           </p>
         </section>
       </div>

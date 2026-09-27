@@ -4,7 +4,7 @@ import { View } from "react-native";
 import { formatListDate } from "@rentbrown/utils";
 import { MOCK_NOW } from "@rentbrown/mock-data";
 
-import { useProfile } from "../../../src/data/hooks";
+import { usePinStatus, useProfile, useSetTransactionPin } from "../../../src/data/hooks";
 import { t } from "../../../src/theme";
 import {
   Body,
@@ -28,7 +28,21 @@ export default function Security() {
   const [pinSheet, setPinSheet] = React.useState(false);
   const [pin, setPin] = React.useState("");
   const [bio, setBio] = React.useState(false);
+  const pinStatus = usePinStatus();
+  const savePin = useSetTransactionPin();
   const p = profile.data;
+  const hasPin = pinStatus.data ?? p?.security.hasTransactionPin ?? false;
+
+  const submitPin = async (value: string) => {
+    setPinSheet(false);
+    setPin("");
+    try {
+      await savePin.mutateAsync(value);
+      toast("Transaction PIN saved");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Couldn't save the PIN — try again");
+    }
+  };
 
   return (
     <Screen bottomPad={110}>
@@ -44,9 +58,9 @@ export default function Security() {
                 <Body style={{ fontWeight: "800" }}>Transaction PIN</Body>
                 <Caption tone="muted">Confirms withdrawals and wallet payments</Caption>
               </View>
-              <StatusPill size="xs" tone={p.security.hasTransactionPin ? "success" : "neutral"} label={p.security.hasTransactionPin ? "Set" : "Not set"} />
+              <StatusPill size="xs" tone={hasPin ? "success" : "neutral"} label={hasPin ? "Set" : "Not set"} />
             </View>
-            <Button variant="outline" size="sm" label={p.security.hasTransactionPin ? "Change PIN" : "Set PIN"} onPress={() => setPinSheet(true)} />
+            <Button variant="outline" size="sm" label={hasPin ? "Change PIN" : "Set PIN"} onPress={() => setPinSheet(true)} />
           </Card>
 
           <Card style={{ gap: 10 }}>
@@ -104,16 +118,12 @@ export default function Security() {
       <BottomSheet open={pinSheet} onClose={() => setPinSheet(false)}>
         <View style={{ gap: 16 }}>
           <Body style={{ fontWeight: "800" }} center>
-            {p?.security.hasTransactionPin ? "Enter a new transaction PIN" : "Set your transaction PIN"}
+            {hasPin ? "Enter a new transaction PIN" : "Set your transaction PIN"}
           </Body>
           <PinPad
             value={pin}
             onChange={setPin}
-            onComplete={() => {
-              setPinSheet(false);
-              setPin("");
-              toast("PIN updated");
-            }}
+            onComplete={(value) => void submitPin(value)}
           />
         </View>
       </BottomSheet>

@@ -48,11 +48,33 @@ const check = (name, cond, extra = "") => {
 };
 const errText = (e) => (e?.message ?? String(e));
 
-const anonClient = createClient(url, anon, { auth: { persistSession: false } });
-const investor = createClient(url, anon, { auth: { persistSession: false } });
-const admin = createClient(url, anon, { auth: { persistSession: false } });
+const anonClient = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+const investor = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+const admin = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
 const svc = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
 const svc2 = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
+
+// Local-clock skew guard (same fix as verify-hosted-p8.mjs): when this
+// machine's clock runs ahead of the auth server, issued sessions look
+// already-expired to supabase-js → a /token refresh on EVERY getSession() →
+// GoTrue rate-limits → failed refresh nulls the session → requests go out as
+// anon. Measure the skew from the first sign-in (iat = expires_at −
+// expires_in) and rebase stored expires_at into local time.
+let CLOCK_SKEW_S = 0;
+const signInHealthy = async (client, creds) => {
+  const { data, error } = await client.auth.signInWithPassword(creds);
+  const s = data?.session;
+  if (CLOCK_SKEW_S === 0 && s?.expires_at && s?.expires_in) {
+    CLOCK_SKEW_S = Date.now() / 1000 - (s.expires_at - s.expires_in);
+    if (Math.abs(CLOCK_SKEW_S) > 120) {
+      console.log(`  (local-vs-auth clock skew ≈ ${Math.round(CLOCK_SKEW_S)}s — session times rebased)`);
+    }
+  }
+  if (s?.expires_at && s?.refresh_token && CLOCK_SKEW_S !== 0) {
+    await client.auth._saveSession({ ...s, expires_at: s.expires_at + CLOCK_SKEW_S });
+  }
+  return { error };
+};
 
 const PRINCIPAL = 10_000_000;   // 1 Terraces slot = ₦100,000
 const PROFIT = 1_650_000;       // 16.5% → ₦16,500
@@ -85,8 +107,8 @@ if (phase === "phaseA") {
     const { error } = await fn();
     check(`${name} denied`, !!error, errText(error));
   }
-  await investor.auth.signInWithPassword(INVESTOR);
-  await admin.auth.signInWithPassword(ADMIN);
+  await signInHealthy(investor, INVESTOR);
+  await signInHealthy(admin, ADMIN);
   {
     const { error } = await investor.rpc("settle_investment", { p_investment_id: "00000000-0000-0000-0000-000000000000" });
     check("investor settle_investment denied", !!error, errText(error));
@@ -117,7 +139,7 @@ if (phase === "phaseA") {
       p_user_id: uid, p_currency: "NGN", p_bucket: "AVAILABLE",
       p_amount_minor: NEED - avail, p_direction: "CREDIT",
       p_reason: "Phase 7B hosted verification funding",
-      p_idempotency_key: `p7-verify-fund-${uid.slice(0, 8)}` });
+      p_idempotency_key: `p7-verify-fund-${uid.slice(0, 8)}-${Date.now()}` });
     check("wallet funded via audited adjustment", !error, errText(error));
   }
 
@@ -276,8 +298,8 @@ if (phase === "phaseA") {
   // ── phase B: real mark_due_investments detection after backdate ────────────
   if (!existsSync(STATE_FILE)) { console.error("run phaseA first"); process.exit(1); }
   const { uid, inv5 } = JSON.parse(readFileSync(STATE_FILE, "utf8"));
-  await investor.auth.signInWithPassword(INVESTOR);
-  await admin.auth.signInWithPassword(ADMIN);
+  await signInHealthy(investor, INVESTOR);
+  await signInHealthy(admin, ADMIN);
 
   console.log("\n== detection: mark_due_investments ==");
   const w0 = await walletAvail(uid);
@@ -301,8 +323,11 @@ if (phase === "phaseA") {
   console.log("\n== reconciliation ==");
   const { data: recon, error: rErr } = await admin.rpc("reconcile_investments");
   check("reconcile_investments runs", !rErr, errText(rErr));
-  check("only the intentional mismatch anomaly remains",
-    recon?.length === 1 && recon[0].check_name === "maturity_amount_mismatch",
+  // Each phaseA run leaves one intentional REVIEW_REQUIRED mismatch fixture;
+  // earlier runs' fixtures accumulate hosted. Assert every anomaly is the
+  // intentional kind rather than an exact count.
+  check("only intentional mismatch anomalies remain",
+    recon?.length >= 1 && recon.every((x) => x.check_name === "maturity_amount_mismatch"),
     JSON.stringify(recon?.map((x) => x.check_name)));
   const { data: wrecon, error: wErr } = await admin.rpc("reconcile_wallets");
   check("reconcile_wallets clean", !wErr && wrecon.length === 0, JSON.stringify(wrecon?.slice(0, 3)));
