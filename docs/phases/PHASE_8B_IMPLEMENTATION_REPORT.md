@@ -18,9 +18,10 @@ server-provided quotes, limits, and statuses.
 - Saved bank accounts: save/archive/default per user with server-side
   ownership validation and audit.
 - Withdrawals: server quote (dynamic minimum, fee + cap, KYC gate,
-  first-withdrawal exemption), idempotent request with PIN verification,
-  ledger hold (Available → Reserved), admin approve/reject/mark-paid, release
-  (Reserved → Available) on rejection, external payout journal on completion.
+  first-withdrawal exemption), idempotent request gated by a committed PIN
+  verification stamp, ledger hold (Available → Reserved), admin
+  approve/reject/mark-paid, release (Reserved → Available) on rejection,
+  external payout journal on completion.
 - Durable outbound events (`withdrawal.requested`/`approved`/`rejected`/
   `completed`) written transactionally for the Make.com → Telegram path.
 - Reconciliation: `reconcile_withdrawals` + `reconcile_kyc` detect anomalies;
@@ -38,6 +39,7 @@ payouts, crypto, FX, USD catalogue, general notifications, referrals.
 | `supabase/migrations/0018_kyc_schema.sql` | `kyc_submissions`, `user_pins`, `user_bank_accounts` tables; `kyc_get_own`, `kyc_save_draft`, `kyc_submit`, `kyc_withdraw_to_draft`, `set_transaction_pin`, `verify_transaction_pin`, `save_bank_account`, `archive_bank_account`, `set_default_bank_account`; private `kyc-documents` bucket + storage policies; BVN column-level masking |
 | `supabase/migrations/0019_withdrawal_gates.sql` | `withdrawal_requests` extension; `quote_withdrawal`, amended `request_withdrawal` (PIN + bank-account params), amended `decide_withdrawal`; dynamic `min_withdrawal_minor` (cheapest published plan maturity when `withdrawal.min_mode = 'DYNAMIC'`); durable outbox inserts |
 | `supabase/migrations/0020_kyc_withdrawal_admin.sql` | `admin_list_kyc_cases`, `admin_get_kyc_case`, `admin_decide_kyc`, `admin_list_withdrawals` (destination label + reviewer), `admin_get_withdrawal`, `reconcile_withdrawals`, `reconcile_kyc` |
+| `supabase/migrations/0021_withdrawal_pin_stamp.sql` | PIN verification stamp: `user_pins.verified_until` + `security.pin.verify_window_seconds` config; `verify_transaction_pin` mints the stamp on success (committed call, so wrong-PIN counter increments always persist); `request_withdrawal` signature drops `p_pin` and requires a fresh stamp instead of verifying inside a transaction that can roll back the counter |
 | `supabase/functions/kyc-document-url/index.ts` | Deployed Edge Function: `{submission_id, kind}` → 60s signed URL for owners or KYC reviewer roles; audits views; never returns public URLs |
 
 All migrations applied to hosted `aqkynjuypijmlqnpcmza` via MCP
@@ -55,9 +57,10 @@ All migrations applied to hosted `aqkynjuypijmlqnpcmza` via MCP
   and withdrawal detail/outbound data.
 - `packages/supabase` investor adapter: real KYC lifecycle calls, private
   storage uploads at the constrained path, `set_transaction_pin`, bank-account
-  RPCs + owner RLS reads, `quote_withdrawal` + amended `request_withdrawal`
-  (amount, destination/bank-account id, idempotency key, PIN), real withdrawal
-  list/detail mapping; mock fallback preserved when unauthenticated.
+  RPCs + owner RLS reads, `quote_withdrawal` + `request_withdrawal` preceded by
+  a committed `verify_transaction_pin` call (the raw PIN never enters the
+  request transaction — `0021`), real withdrawal list/detail mapping; mock
+  fallback preserved when unauthenticated.
 - `packages/supabase` admin adapter: real KYC list/detail/decision, signed
   document URLs via `kyc-document-url`, withdrawal list/detail/decision,
   withdrawal + KYC reconciliation; mock delegation preserved unauthenticated.
@@ -85,14 +88,33 @@ All migrations applied to hosted `aqkynjuypijmlqnpcmza` via MCP
 
 | Suite | Result |
 |---|---|
-| `node scripts/verify-migrations.mjs` (local embedded PG) | **426 passed, 0 failed** |
-| `node scripts/verify-hosted-p8.mjs` | **67 passed, 0 failed** |
-| `node scripts/verify-hosted-p6.mjs` (regression) | **50 passed, 0 failed** |
-| `node scripts/verify-hosted-p7.mjs` phaseA / phaseB (regression) | **34/35 passed + 10/10 passed, 0 failed** |
+| `node scripts/verify-migrations.mjs` (local embedded PG) | **434 passed, 0 failed** |
+| `node scripts/verify-hosted-p8.mjs` | **70 passed, 0 failed** |
+| `node scripts/verify-hosted-p6.mjs` (regression) | **51 passed, 0 failed** |
+| `node scripts/verify-hosted-p7.mjs` phaseA / phaseB (regression) | **34 passed + 10 passed, 0 failed** |
 | `pnpm typecheck` / `pnpm lint` / `pnpm build` | clean across all packages + apps |
+
+The post-audit additions specifically assert: `amount < ₦10,000` exempt,
+`amount == ₦10,000` requires KYC, `amount > ₦10,000` requires KYC (hosted),
+first-ever withdrawal exemption, declined first withdrawal still consumes the
+exemption, second withdrawal always requires KYC, concurrent first withdrawals
+persist exactly one row (loser gets `ERR_KYC`), `request_withdrawal` and
+`quote_withdrawal` expose no client-overridable policy parameters, no-stamp
+requests raise `ERR_PIN_VERIFY`, and a failed withdrawal-path PIN attempt
+persists its counter increment (`0021`).
 
 ## Issues found and fixed during verification
 
+- **PIN lockout rollback bypass (real bug, `0021`):** `request_withdrawal`
+  called `verify_transaction_pin` and raised `ERR_PIN` on mismatch inside the
+  same transaction, so the failed-attempt increment rolled back too — hosted
+  probing showed three wrong-PIN withdrawal attempts left `failed_attempts`
+  at 0. Fixed by separating verification from the request: a committed
+  `verify_transaction_pin` call mints a short-lived `verified_until` stamp
+  (default 120 s, `security.pin.verify_window_seconds`); `request_withdrawal`
+  lost its `p_pin` parameter and requires the stamp, so no withdrawal path can
+  verify a raw PIN inside a transaction that rolls back. Idempotent replays
+  short-circuit before the stamp check, so retries never re-verify.
 - **Hosted `post_journal` divergence (real bug):** the hosted copy was missing
   `into v_j` on the idempotent-replay path — replayed journal keys raised
   `42601 query has no destination for result data`. Caught by the Phase 6
@@ -123,8 +145,9 @@ All migrations applied to hosted `aqkynjuypijmlqnpcmza` via MCP
 - Full BVN is never returned to list surfaces — masked everywhere except
   `admin_get_kyc_case` for reviewer roles.
 - PINs are stored hashed (`crypt`/`gen_salt`, pgcrypto-qualified) with
-  failed-attempt locking; verification failures increment the counter without
-  rolling it back.
+  failed-attempt locking; `verify_transaction_pin` is the only RPC that sees a
+  raw PIN and it commits its counter increments independently of any
+  withdrawal request (`0021`).
 - Withdrawal requests are idempotent on `p_idempotency_key`; admin decisions
   carry request ids and are audited.
 - Reconciliation is detection-only.

@@ -189,11 +189,18 @@ const ensureUser = async ({ email, password }) => {
   }
   throw new Error(`createUser ${email}: rate limit persists`);
 };
-const requestWd = (c, amount, key, pin, dest = null) =>
-  c.rpc("request_withdrawal", {
+// PIN verification is its own committed RPC: it mints the short-lived
+// verified_until stamp that request_withdrawal requires (0021). The request
+// never sees the raw PIN, so its rollback cannot erase the attempt counter.
+const requestWd = async (c, amount, key, pin, dest = null) => {
+  const { data: ok, error: vErr } = await c.rpc("verify_transaction_pin", { p_pin: pin });
+  if (vErr) return { data: null, error: vErr };
+  if (!ok) return { data: null, error: new Error("ERR_PIN: incorrect PIN") };
+  return c.rpc("request_withdrawal", {
     p_amount_minor: amount,
     p_destination: dest ?? { bank_name: "GTBank", account_number: "0123456789", account_name: "P8T Test" },
-    p_idempotency_key: key, p_pin: pin });
+    p_idempotency_key: key });
+};
 const efDocUrl = async (client, submissionId, kind) => {
   const { data: sess } = await client.auth.getSession();
   const res = await fetch(`${url}/functions/v1/kyc-document-url`, {
@@ -404,6 +411,9 @@ await svc.from("admin_config").update({ value: "FIXED" }).eq("key", "withdrawal.
   const { error: at } = await requestWd(inv2, 1_000_000, "p8t-i2-at-threshold", "135792");
   check("amount == ₦10,000 threshold requires KYC", !!at && /ERR_KYC/.test(errText(at)), errText(at));
 
+  const { error: over } = await requestWd(inv2, 1_000_001, `p8t-i2-over-threshold-${RUN}`, "135792");
+  check("amount > ₦10,000 on first withdrawal requires KYC", !!over && /ERR_KYC/.test(errText(over)), errText(over));
+
   const { data: w1, error: w1Err } = await requestWd(inv2, 800_000, "p8t-i2-first", "135792");
   check("first withdrawal below threshold needs no KYC", !w1Err && w1?.status === "REQUESTED", errText(w1Err));
 
@@ -440,6 +450,14 @@ await reauth(inv3, P8T3);
   await fund(uid3, 5_000_000, `i3-${Date.now()}`);
   // temporarily under FIXED window already restored — use svc flip for the race
   await svc.from("admin_config").update({ value: "FIXED" }).eq("key", "withdrawal.min_mode");
+  // PIN gate: the request RPC never sees a raw PIN — without a committed
+  // verify stamp it must refuse before any financial effect.
+  const { error: noStamp } = await inv3.rpc("request_withdrawal", {
+    p_amount_minor: 800_000,
+    p_destination: { bank_name: "GTBank", account_number: "0123456789", account_name: "P8T Test" },
+    p_idempotency_key: `p8t-i3-nostamp-${RUN}` });
+  check("withdrawal without fresh PIN stamp → ERR_PIN_VERIFY",
+    !!noStamp && /ERR_PIN_VERIFY/.test(errText(noStamp)), errText(noStamp));
   const [rA, rB] = await Promise.all([
     requestWd(inv3, 800_000, "p8t-i3-race-a", "246810"),
     requestWd(inv3, 800_000, "p8t-i3-race-b", "246810"),
@@ -495,8 +513,14 @@ console.log("\n== withdrawal settle ==");
   check("dynamic minimum = cheapest plan slot maturity",
     Number(minD) === dynExpected, `min=${minD} expected=${dynExpected}`);
 
+  // Wrong-PIN attempts must increment the counter — committed by the
+  // standalone verify RPC even though the request itself never runs.
+  const pinBefore = (await svc.from("user_pins").select("failed_attempts").eq("user_id", uidA).single()).data?.failed_attempts ?? 0;
   const { error: badPin } = await requestWd(investor, adaAsk, `p8t-ada-badpin-${RUN}`, "000000");
   check("wrong pin rejected", !!badPin && /ERR_PIN/.test(errText(badPin)), errText(badPin));
+  const pinAfter = (await svc.from("user_pins").select("failed_attempts").eq("user_id", uidA).single()).data?.failed_attempts ?? 0;
+  check("wrong-PIN attempt counter persists (no rollback bypass)", pinAfter === pinBefore + 1,
+    `${pinBefore}→${pinAfter}`);
 
   const { error: big } = await requestWd(investor, 999_999_999, `p8t-ada-big-${RUN}`, "242424");
   check("insufficient balance rejected", !!big, errText(big));

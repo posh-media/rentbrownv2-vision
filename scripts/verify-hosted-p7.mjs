@@ -48,11 +48,24 @@ const check = (name, cond, extra = "") => {
 };
 const errText = (e) => (e?.message ?? String(e));
 
-const anonClient = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
-const investor = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
-const admin = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
-const svc = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
-const svc2 = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
+// Transient-network retry: undici occasionally fails a request mid-flight
+// ("fetch failed") on Windows; retry once or twice before surfacing it.
+const retryFetch = async (input, init) => {
+  let lastErr;
+  for (let i = 0; i < 4; i++) {
+    try { return await fetch(input, init); }
+    catch (e) { lastErr = e; await new Promise((r) => setTimeout(r, 800 * (i + 1))); }
+  }
+  throw lastErr;
+};
+const noRetry = { auth: { persistSession: false, autoRefreshToken: false } };
+const retrying = { ...noRetry, global: { fetch: retryFetch } };
+
+const anonClient = createClient(url, anon, noRetry);
+const investor = createClient(url, anon, retrying);
+const admin = createClient(url, anon, retrying);
+const svc = createClient(url, service, retrying);
+const svc2 = createClient(url, service, retrying);
 
 // Local-clock skew guard (same fix as verify-hosted-p8.mjs): when this
 // machine's clock runs ahead of the auth server, issued sessions look

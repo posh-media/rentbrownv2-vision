@@ -215,6 +215,10 @@ const expectFail = async (name, fn) => {
   try { await fn(); } catch { failed = true; }
   check(name, failed);
 };
+const expectErr = async (name, fn, needle) => {
+  try { await fn(); check(name, false, "no error raised"); }
+  catch (e) { check(name, e.message.includes(needle), e.message); }
+};
 
 // ── structure: tables, enums, column types ───────────────────────────────────
 r = await admin.query(`
@@ -404,7 +408,7 @@ check("investor gets nothing from admin RPC", r.rows.length === 0);
 
 // ── admin_config: seeds, validation, history, audit ──────────────────────────
 r = await admin.query("select count(*)::int c from public.admin_config");
-check("admin_config seeded (10 phase-3 + 16 payment + 3 maturity + 9 phase-8 keys)", r.rows[0].c === 38, `found ${r.rows[0].c}`);
+check("admin_config seeded (10 phase-3 + 16 payment + 3 maturity + 10 phase-8 keys)", r.rows[0].c === 39, `found ${r.rows[0].c}`);
 r = await admin.query("select value from public.admin_config where key='referral.signup_reward_minor'");
 check("signup reward seeded = 150000", r.rows[0].value === 150000, r.rows[0].value);
 r = await admin.query("select value from public.admin_config where key='platform.supported_currencies'");
@@ -981,18 +985,27 @@ await asUserSession(uid3, () => admin.query(
   `select public.set_admin_config('withdrawal.min_mode','"FIXED"'::jsonb,'p5 legacy min','req-p5')`));
 await asUserSession(uid4, () => admin.query(`select public.set_transaction_pin('424242')`));
 
-await expectFail("withdrawal below minimum rejected", () =>
+await expectErr("withdrawal below minimum rejected", () =>
   asUserSession(uid4, () => admin.query(
-    `select * from public.request_withdrawal(400000,'{"bank_name":"GTB","account_number":"0123","account_name":"A"}'::jsonb,'w-min')`)));
+    `select * from public.request_withdrawal(400000,'{"bank_name":"GTB","account_number":"0123","account_name":"A"}'::jsonb,'w-min')`)),
+  "minimum withdrawal");
 await expectFail("withdrawal insufficient funds rejected", () =>
   asUserSession(uid4, () => admin.query(
     `select * from public.request_withdrawal(99999999,'{"bank_name":"GTB","account_number":"0123","account_name":"A"}'::jsonb,'w-big')`)));
-await expectFail("withdrawal bad destination rejected", () =>
-  asUserSession(uid4, () => admin.query(
-    `select * from public.request_withdrawal(500000,'{"bank_name":"GTB"}'::jsonb,'w-dest')`)));
 
+// 0021: PIN verification is a separate committed RPC that mints a
+// verified_until stamp; request_withdrawal requires the stamp.
+await expectErr("withdrawal without fresh PIN stamp rejected", () =>
+  asUserSession(uid4, () => admin.query(
+    `select * from public.request_withdrawal(500000,'{"bank_name":"GTBank","account_number":"0123456789","account_name":"Ada Okafor"}'::jsonb,'w-0')`)),
+  "ERR_PIN_VERIFY");
+await asUserSession(uid4, () => admin.query(`select public.verify_transaction_pin('424242')`));
+await expectErr("withdrawal bad destination rejected", () =>
+  asUserSession(uid4, () => admin.query(
+    `select * from public.request_withdrawal(500000,'{"bank_name":"GTB"}'::jsonb,'w-dest')`)),
+  "ERR_DESTINATION");
 let wd = first(await asUserSession(uid4, () => admin.query(
-  `select * from public.request_withdrawal(500000,'{"bank_name":"GTBank","account_number":"0123456789","account_name":"Ada Okafor"}'::jsonb,'w-1',null,'424242')`)));
+  `select * from public.request_withdrawal(500000,'{"bank_name":"GTBank","account_number":"0123456789","account_name":"Ada Okafor"}'::jsonb,'w-1')`)));
 check("withdrawal REQUESTED", wd.status === "REQUESTED" && /^WD-[0-9A-F]{12}$/.test(wd.reference));
 check("fee snapshot 5%", wd.fee_minor === "25000" && wd.net_minor === "475000", `fee=${wd.fee_minor}`);
 check("hold journal linked", wd.hold_journal_id !== null);
@@ -1002,9 +1015,11 @@ check("funds held (avail→reserved)", r.rows[0].available_minor === "350000" &&
 r = await admin.query("select status, payload->>'spec' spec, payload->>'event_type' et from public.outbound_events where aggregate_id=$1", [wd.id]);
 check("outbox row queued with v1 payload", r.rows[0].status === "QUEUED" && r.rows[0].spec === "rentbrown.outbound.v1" && r.rows[0].et === "withdrawal.requested");
 
+// idempotent replay short-circuits before the PIN-stamp check — a retry never
+// requires re-verification.
 let wd1b = first(await asUserSession(uid4, () => admin.query(
-  `select * from public.request_withdrawal(500000,'{"bank_name":"GTBank","account_number":"0123456789","account_name":"Ada Okafor"}'::jsonb,'w-1',null,'424242')`)));
-check("withdrawal init idempotent", wd1b.id === wd.id);
+  `select * from public.request_withdrawal(500000,'{"bank_name":"GTBank","account_number":"0123456789","account_name":"Ada Okafor"}'::jsonb,'w-1')`)));
+check("withdrawal init idempotent (replay needs no stamp)", wd1b.id === wd.id);
 r = await admin.query("select reserved_minor from public.wallets where user_id=$1 and currency='NGN'", [uid4]);
 check("retry did not double-hold", r.rows[0].reserved_minor === "580000", r.rows[0].reserved_minor);
 
@@ -1049,8 +1064,9 @@ await asUserSession(uid1, () => admin.query(`select * from public.admin_decide_k
 r = await admin.query("select kyc_verified from public.profiles where id=$1", [uid4]);
 check("uid4 kyc verified (profile projection)", r.rows[0].kyc_verified === true);
 
+await asUserSession(uid4, () => admin.query(`select public.verify_transaction_pin('424242')`));
 let wd2 = first(await asUserSession(uid4, () => admin.query(
-  `select * from public.request_withdrawal(500000,'{"bank_name":"GTBank","account_number":"0123456789","account_name":"Ada Okafor"}'::jsonb,'w-2',null,'424242')`)));
+  `select * from public.request_withdrawal(500000,'{"bank_name":"GTBank","account_number":"0123456789","account_name":"Ada Okafor"}'::jsonb,'w-2')`)));
 wd2 = first(await asUserSession(uid1, () => admin.query(`select * from public.decide_withdrawal($1,'REJECT','docs unclear')`, [wd2.id])));
 check("withdrawal REJECTED", wd2.status === "REJECTED" && wd2.release_journal_id !== null);
 r = await admin.query("select journal_type from public.journal_entries where id=$1", [wd2.release_journal_id]);
@@ -1198,11 +1214,6 @@ const terraces = await seedRound("the-terraces-ikoyi");
 const wuse = await seedRound("wuse-square-residences");
 const maitama = await seedRound("maitama-heights");
 const harbour = await seedRound("harbour-view-suites");
-
-const expectErr = async (name, fn, needle) => {
-  try { await fn(); check(name, false, "no error raised"); }
-  catch (e) { check(name, e.message.includes(needle), e.message); }
-};
 
 console.log("── Phase 6: request_investment — happy path ───");
 
@@ -1809,6 +1820,13 @@ for (let i = 0; i < 4; i++) {
 await expectErr("pin locked after max attempts", () =>
   asUserSession(uid9, () => admin.query(`select public.verify_transaction_pin('654321')`)),
   "ERR_PIN_LOCKED");
+// the withdrawal path can no longer verify a raw PIN at all — a locked (or
+// never-verified) account has no stamp and is refused outright; attempts
+// always go through the standalone verify RPC, whose counter commits.
+await expectErr("locked account cannot withdraw (no stamp possible)", () =>
+  asUserSession(uid9, () => admin.query(
+    `select * from public.request_withdrawal(500000,'{"bank_name":"GTB","account_number":"0123","account_name":"A"}'::jsonb,'w9-locked')`)),
+  "ERR_PIN_VERIFY");
 // re-setting the PIN clears lockout (lost-PIN recovery is Phase 9)
 await asUserSession(uid9, () => admin.query(`select public.set_transaction_pin('654321')`));
 r = await asUserSession(uid9, () => admin.query(`select public.verify_transaction_pin('654321') v`));
@@ -1855,22 +1873,29 @@ check("quote computes fee+net", qt.fee_minor === 75000 && qt.net_minor === 14250
 
 console.log("── Phase 8: withdrawal gates ───────────────────");
 
-// verified + PIN + funds + bank-account destination snapshot
+// verified + PIN stamp + funds + bank-account destination snapshot
+await asUserSession(uid9, () => admin.query(`select public.verify_transaction_pin('654321')`));
 let wd9 = first(await asUserSession(uid9, () => admin.query(
-  `select * from public.request_withdrawal(1500000,null,'w9-1',null,'654321','${ba9.id}')`)));
+  `select * from public.request_withdrawal(1500000,null,'w9-1',null,'${ba9.id}')`)));
 check("verified withdrawal REQUESTED", wd9.status === "REQUESTED" && typeof wd9.destination === "object");
 check("destination snapshot copied", wd9.destination.bank_name === "GTBank"
   && wd9.destination.account_number === "0123456789" && wd9.destination.bank_account_id === ba9.id);
 await asUserSession(uid9, () => admin.query(`select public.archive_bank_account('${ba9.id}')`));
 r = await admin.query("select destination from public.withdrawals where id=$1", [wd9.id]);
 check("snapshot survives bank archive", r.rows[0].destination.account_number === "0123456789");
-await expectErr("wrong pin rejected", () =>
-  asUserSession(uid9, () => admin.query(
-    `select * from public.request_withdrawal(500000,'{"bank_name":"GTB","account_number":"0123","account_name":"A"}'::jsonb,'w9-bad',null,'000000')`)),
-  "ERR_PIN");
+// wrong PINs are rejected (and counted) at the standalone verify step — the
+// request RPC never sees a raw PIN, so this check exercises the verify path.
+r = await admin.query(`select failed_attempts from public.user_pins where user_id=$1`, [uid9]);
+const fa9 = r.rows[0].failed_attempts;
+r = await asUserSession(uid9, () => admin.query(`select public.verify_transaction_pin('000000') v`));
+check("wrong pin returns false (attempt counted)", r.rows[0].v === false);
+r = await admin.query(`select failed_attempts from public.user_pins where user_id=$1`, [uid9]);
+check("failed attempt persists in committed counter", r.rows[0].failed_attempts === fa9 + 1,
+  `${fa9}→${r.rows[0].failed_attempts}`);
+await asUserSession(uid9, () => admin.query(`select public.verify_transaction_pin('654321')`));
 await expectErr("insufficient balance rejected", () =>
   asUserSession(uid9, () => admin.query(
-    `select * from public.request_withdrawal(99999999,'{"bank_name":"GTB","account_number":"0123","account_name":"A"}'::jsonb,'w9-big',null,'654321')`)),
+    `select * from public.request_withdrawal(99999999,'{"bank_name":"GTB","account_number":"0123","account_name":"A"}'::jsonb,'w9-big')`)),
   "insufficient available balance");
 // idempotent replay returns the same withdrawal without re-verifying PIN
 let wd9b = first(await asUserSession(uid9, () => admin.query(
@@ -1884,12 +1909,13 @@ await asUserSession(uid1, () => admin.query(
 qt = first(await asUserSession(uid11, () => admin.query(`select public.quote_withdrawal(800000) q`))).q;
 check("quote flags first-withdrawal exemption", qt.first_withdrawal === true && qt.kyc_exempt === true
   && qt.eligible === true && qt.kyc_verified === false, JSON.stringify(qt));
+await asUserSession(uid11, () => admin.query(`select public.verify_transaction_pin('112233')`));
 let wd11 = first(await asUserSession(uid11, () => admin.query(
-  `select * from public.request_withdrawal(800000,'{"bank_name":"GTB","account_number":"0111","account_name":"W Eleven"}'::jsonb,'w11-1',null,'112233')`)));
+  `select * from public.request_withdrawal(800000,'{"bank_name":"GTB","account_number":"0111","account_name":"W Eleven"}'::jsonb,'w11-1')`)));
 check("first withdrawal below threshold needs no KYC", wd11.status === "REQUESTED");
 await expectErr("second withdrawal requires KYC", () =>
   asUserSession(uid11, () => admin.query(
-    `select * from public.request_withdrawal(600000,'{"bank_name":"GTB","account_number":"0111","account_name":"W Eleven"}'::jsonb,'w11-2',null,'112233')`)),
+    `select * from public.request_withdrawal(600000,'{"bank_name":"GTB","account_number":"0111","account_name":"W Eleven"}'::jsonb,'w11-2')`)),
   "ERR_KYC");
 
 // declined/failed/rejected still consumes the exception
@@ -1901,7 +1927,7 @@ r = await admin.query(`select event_type from public.outbound_events
 check("requested + rejected outbox events", r.rows.map((x) => x.event_type).join() === "withdrawal.requested,withdrawal.rejected");
 await expectErr("declined first wd still consumes exception", () =>
   asUserSession(uid11, () => admin.query(
-    `select * from public.request_withdrawal(500000,'{"bank_name":"GTB","account_number":"0111","account_name":"W Eleven"}'::jsonb,'w11-3',null,'112233')`)),
+    `select * from public.request_withdrawal(500000,'{"bank_name":"GTB","account_number":"0111","account_name":"W Eleven"}'::jsonb,'w11-3')`)),
   "ERR_KYC");
 
 // boundary: exactly at threshold requires KYC (strictly-less-than)
@@ -1910,16 +1936,19 @@ await asUserSession(uid1, () => admin.query(
   `select * from public.admin_post_adjustment('${uid12}','NGN','AVAILABLE',2000000,'CREDIT','p8 funding','req-p8-c','adj:p8-12')`));
 await expectErr("amount == threshold requires KYC", () =>
   asUserSession(uid12, () => admin.query(
-    `select * from public.request_withdrawal(1000000,'{"bank_name":"GTB","account_number":"0222","account_name":"W Twelve"}'::jsonb,'w12-1',null,'121212')`)),
+    `select * from public.request_withdrawal(1000000,'{"bank_name":"GTB","account_number":"0222","account_name":"W Twelve"}'::jsonb,'w12-1')`)),
   "ERR_KYC");
+await asUserSession(uid12, () => admin.query(`select public.verify_transaction_pin('121212')`));
 let wd12 = first(await asUserSession(uid12, () => admin.query(
-  `select * from public.request_withdrawal(999999,'{"bank_name":"GTB","account_number":"0222","account_name":"W Twelve"}'::jsonb,'w12-2',null,'121212')`)));
+  `select * from public.request_withdrawal(999999,'{"bank_name":"GTB","account_number":"0222","account_name":"W Twelve"}'::jsonb,'w12-2')`)));
 check("amount < threshold exempt", wd12.status === "REQUESTED");
 
 // concurrency: two parallel first withdrawals — exactly one wins the exception
 await asUserSession(uid13, () => admin.query(`select public.set_transaction_pin('131313')`));
 await asUserSession(uid1, () => admin.query(
   `select * from public.admin_post_adjustment('${uid13}','NGN','AVAILABLE',2000000,'CREDIT','p8 funding','req-p8-d','adj:p8-13')`));
+// one committed verify mints the stamp that gates both race requests
+await asUserSession(uid13, () => admin.query(`select public.verify_transaction_pin('131313')`));
 const cA = new pg.Client({ host: "127.0.0.1", port: 55432, user: "postgres", password: "postgres", database: "verify" });
 await cA.connect();
 const wdRace = async (client, key) => {
@@ -1927,7 +1956,7 @@ const wdRace = async (client, key) => {
   await client.query("set role authenticated");
   try {
     return await client.query(
-      `select * from public.request_withdrawal(800000,'{"bank_name":"GTB","account_number":"0333","account_name":"W Thirteen"}'::jsonb,'${key}',null,'131313')`);
+      `select * from public.request_withdrawal(800000,'{"bank_name":"GTB","account_number":"0333","account_name":"W Thirteen"}'::jsonb,'${key}')`);
   } finally { await client.query("reset role"); }
 };
 const [w13a, w13b] = await Promise.allSettled([wdRace(admin, "w13-a"), wdRace(cA, "w13-b")]);
@@ -1938,6 +1967,7 @@ check("loser got ERR_KYC", [w13a, w13b].filter((x) => x.status === "rejected").l
   JSON.stringify([w13a.status, w13b.status]));
 
 // concurrent same-wallet double-spend: uid9 has ₦35,000 available — two ₦30,000 asks, one wins
+await asUserSession(uid9, () => admin.query(`select public.verify_transaction_pin('654321')`));
 const cB = new pg.Client({ host: "127.0.0.1", port: 55432, user: "postgres", password: "postgres", database: "verify" });
 await cB.connect();
 const wdRace9 = async (client, key) => {
@@ -1945,7 +1975,7 @@ const wdRace9 = async (client, key) => {
   await client.query("set role authenticated");
   try {
     return await client.query(
-      `select * from public.request_withdrawal(3000000,'{"bank_name":"GTB","account_number":"0999","account_name":"K Nine"}'::jsonb,'${key}',null,'654321')`);
+      `select * from public.request_withdrawal(3000000,'{"bank_name":"GTB","account_number":"0999","account_name":"K Nine"}'::jsonb,'${key}')`);
   } finally { await client.query("reset role"); }
 };
 const [r9a, r9b] = await Promise.allSettled([wdRace9(admin, "w9-race-a"), wdRace9(cB, "w9-race-b")]);
@@ -2002,6 +2032,26 @@ check("flag-without-submission detected", r.rows.some((x) => x.check_name === "p
 await admin.query("update public.profiles set kyc_verified=false where id=$1", [uid2]);
 await expectFail("investor cannot run withdrawal reconcile", () =>
   asUserSession(uid9, () => admin.query(`select * from public.reconcile_withdrawals()`)));
+
+// no client-overridable policy params on the withdrawal RPCs — quote/request
+// recompute everything server-side from config + ledger.
+r = await admin.query(`select proname, proargnames::text[] a from pg_proc
+  where proname in ('request_withdrawal','quote_withdrawal') and pronamespace='public'::regnamespace`);
+const blockedArgs = ["p_pin","p_kyc_required","p_kyc_exempt","p_first_withdrawal","p_fee_minor","p_net_minor","p_min_minor","p_threshold"];
+check("withdrawal RPCs expose no policy-override params",
+  r.rows.every((x) => !(x.a ?? []).some((a) => blockedArgs.includes(a))),
+  JSON.stringify(r.rows.map((x) => x.a)));
+
+// PIN values never leak into events, audit, or outbound payloads.
+r = await admin.query(`select event_type, substring(payload::text from '"(654321|112233|121212|131313|424242)"') m, payload::text p from public.outbound_events where payload::text ~ '"(654321|112233|121212|131313|424242)"'`);
+check("PINs absent from outbound payloads", r.rows.length === 0,
+  JSON.stringify(r.rows.map((x) => `${x.event_type} match=${x.m} :: ${x.p.slice(0, 400)}`)));
+r = await admin.query(`select count(*)::int c from public.withdrawal_events where note ~ '654321|112233|121212|131313|424242'`);
+check("PINs absent from withdrawal events", r.rows[0].c === 0);
+r = await admin.query(`select count(*)::int c from public.kyc_events where note ~ '654321|112233|121212|131313|424242'`);
+check("PINs absent from kyc events", r.rows[0].c === 0);
+r = await admin.query(`select count(*)::int c from public.audit_log where metadata::text ~ '654321|112233|121212|131313|424242' or action ~ '654321|112233|121212|131313|424242'`);
+check("PINs absent from audit log", r.rows[0].c === 0);
 
 // ════════════════════════════════════════════════════════════════════════════
 

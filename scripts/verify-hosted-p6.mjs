@@ -210,8 +210,16 @@ console.log("\n== idempotency ==");
 // ── 7. Insufficient balance — no side effects ────────────────────────────────
 console.log("\n== insufficient balance ==");
 {
+  // Fresh zero-slot, zero-balance user — the persistent investor accumulates
+  // slots across runs, which makes the per-user limit fire before the balance
+  // check and masks this assertion.
+  const poorCreds = { email: `p6t-poor-${Date.now()}@rentbrown.dev`, password: "P6t!Poor9999" };
+  const { error: cErr } = await svc.auth.admin.createUser({ ...poorCreds, email_confirm: true });
+  check("fresh zero-balance user created", !cErr, errText(cErr));
+  const poor = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+  await signInHealthy(poor, poorCreds);
   const { data: r0 } = await svc.from("investment_rounds").select("allocated_slots").eq("id", terraces.round.id).single();
-  const { error } = await investor.rpc("request_investment", {
+  const { error } = await poor.rpc("request_investment", {
     p_round_id: terraces.round.id, p_slots: 45, p_idempotency_key: `poor-${Date.now()}`,
   });
   check("ERR_INSUFFICIENT_BALANCE", /ERR_INSUFFICIENT_BALANCE/.test(errText(error)), errText(error));

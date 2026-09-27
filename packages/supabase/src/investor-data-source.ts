@@ -105,6 +105,7 @@ function investmentError(error: { message?: string }): Error {
     ERR_PIN: "Incorrect transaction PIN.",
     ERR_PIN_NOT_SET: "Set a transaction PIN before withdrawing.",
     ERR_PIN_LOCKED: "Too many failed PIN attempts — try again later.",
+    ERR_PIN_VERIFY: "Verify your transaction PIN to continue.",
     ERR_KYC: "Identity verification is required before withdrawing.",
     ERR_DESTINATION: "Choose a valid bank account.",
     ERR_BVN: "BVN must be exactly 11 digits.",
@@ -1239,11 +1240,19 @@ export function createSupabaseInvestorDataSource(
       hasSession().then((ok) => (ok ? fetchWithdrawalQuote(amount, destinationId) : domain.quoteWithdrawal(amount, destinationId))),
     async requestWithdrawal(input) {
       if (!(await hasSession())) return domain.requestWithdrawal(input);
+      // PIN verification is its own committed RPC — request_withdrawal never
+      // sees the raw PIN, so a failed request can't roll back the attempt
+      // counter. A successful verify mints the short-lived verified_until
+      // stamp the request requires (0021).
+      const { data: pinOk, error: pinErr } = await client.rpc("verify_transaction_pin", {
+        p_pin: input.pin,
+      });
+      if (pinErr) throw investmentError(pinErr);
+      if (!pinOk) throw investmentError({ message: "ERR_PIN" });
       const { data, error } = await client.rpc("request_withdrawal", {
         p_amount_minor: input.amount,
         p_destination: null,
         p_idempotency_key: input.idempotencyKey,
-        p_pin: input.pin,
         p_bank_account_id: input.destinationId,
       });
       if (error) throw investmentError(error);
