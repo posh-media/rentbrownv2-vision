@@ -241,6 +241,70 @@ export function useReferrals() {
   });
 }
 
+// ── Phase 9B: rewards & task rewards ─────────────────────────────────────────
+
+export function useRewards() {
+  const ds = useDataSource();
+  const session = useSession();
+  return useQuery({
+    queryKey: ["rewards"],
+    queryFn: () => ds.listRewards(),
+    enabled: !!session.data,
+  });
+}
+
+export function useTransferBonus() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { amount?: number; idempotencyKey: string }) =>
+      ds.transferBonusToAvailable(input.amount, "NGN", input.idempotencyKey),
+    onSuccess: () => void qc.invalidateQueries(),
+  });
+}
+
+export function useRewardTasks() {
+  const ds = useDataSource();
+  const session = useSession();
+  return useQuery({
+    queryKey: ["reward-tasks"],
+    queryFn: () => ds.listRewardTasks(),
+    enabled: !!session.data,
+  });
+}
+
+export function useMyTaskClaims() {
+  const ds = useDataSource();
+  const session = useSession();
+  return useQuery({
+    queryKey: ["task-claims"],
+    queryFn: () => ds.listMyTaskClaims(),
+    enabled: !!session.data,
+  });
+}
+
+export function useClaimRewardTask() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      taskId: string;
+      idempotencyKey: string;
+      evidence?: Record<string, unknown>;
+    }) => ds.claimRewardTask(input),
+    onSuccess: () => void qc.invalidateQueries(),
+  });
+}
+
+export function useIdentityLink() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (provider: "TELEGRAM") => ds.createIdentityLink(provider),
+    onSuccess: () => void qc.invalidateQueries(),
+  });
+}
+
 export function useNotifications() {
   const ds = useDataSource();
   const session = useSession();

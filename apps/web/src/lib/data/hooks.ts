@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  keepPreviousData,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   BankAccountInput,
   InvestmentFilter,
@@ -74,7 +69,10 @@ export function useDashboard() {
   return useQuery({ queryKey: key("dashboard"), queryFn: () => ds.getDashboard() });
 }
 
-export function useOpportunities(filter?: OpportunityFilter, opts?: { initialData?: Opportunity[] }) {
+export function useOpportunities(
+  filter?: OpportunityFilter,
+  opts?: { initialData?: Opportunity[] },
+) {
   const ds = useDataSource();
   const key = useKey();
   return useQuery({
@@ -87,7 +85,11 @@ export function useOpportunities(filter?: OpportunityFilter, opts?: { initialDat
 export function useOpportunity(slug: string, opts?: { initialData?: Opportunity | null }) {
   const ds = useDataSource();
   const key = useKey();
-  return useQuery({ queryKey: key("opportunity", slug), queryFn: () => ds.getOpportunity(slug), initialData: opts?.initialData });
+  return useQuery({
+    queryKey: key("opportunity", slug),
+    queryFn: () => ds.getOpportunity(slug),
+    initialData: opts?.initialData,
+  });
 }
 
 export function useInvestmentQuote(roundId: string, slots: number) {
@@ -125,7 +127,10 @@ export function useSubmission(reference: string) {
 export function useInvestments(filter?: InvestmentFilter) {
   const ds = useDataSource();
   const key = useKey();
-  return useQuery({ queryKey: key("investments", filter), queryFn: () => ds.listInvestments(filter) });
+  return useQuery({
+    queryKey: key("investments", filter),
+    queryFn: () => ds.listInvestments(filter),
+  });
 }
 
 export function useInvestment(id: string) {
@@ -143,7 +148,10 @@ export function useWallet() {
 export function useTransactions(filter?: TransactionFilter) {
   const ds = useDataSource();
   const key = useKey();
-  return useQuery({ queryKey: key("transactions", filter), queryFn: () => ds.listTransactions(filter) });
+  return useQuery({
+    queryKey: key("transactions", filter),
+    queryFn: () => ds.listTransactions(filter),
+  });
 }
 
 export function useTransaction(id: string | null) {
@@ -184,7 +192,9 @@ export function useWithdrawal(id: string) {
     queryFn: () => ds.getWithdrawal(id),
     refetchInterval: (query) => {
       const s = query.state.data?.status;
-      return s === "REQUESTED" || s === "UNDER_REVIEW" || s === "APPROVED" || s === "PROCESSING" ? 4000 : false;
+      return s === "REQUESTED" || s === "UNDER_REVIEW" || s === "APPROVED" || s === "PROCESSING"
+        ? 4000
+        : false;
     },
   });
 }
@@ -298,13 +308,19 @@ export function useNotifications() {
 export function useMarkRead() {
   const ds = useDataSource();
   const qc = useQueryClient();
-  return useMutation({ mutationFn: (id: string) => ds.markNotificationRead(id), onSuccess: () => qc.invalidateQueries() });
+  return useMutation({
+    mutationFn: (id: string) => ds.markNotificationRead(id),
+    onSuccess: () => qc.invalidateQueries(),
+  });
 }
 
 export function useMarkAllRead() {
   const ds = useDataSource();
   const qc = useQueryClient();
-  return useMutation({ mutationFn: () => ds.markAllNotificationsRead(), onSuccess: () => qc.invalidateQueries() });
+  return useMutation({
+    mutationFn: () => ds.markAllNotificationsRead(),
+    onSuccess: () => qc.invalidateQueries(),
+  });
 }
 
 export function useKyc() {
@@ -325,8 +341,64 @@ export function useReferrals() {
   return useQuery({ queryKey: key("referrals"), queryFn: () => ds.listReferrals() });
 }
 
+// ── Phase 9B: rewards & task rewards ─────────────────────────────────────────
+
+export function useRewards() {
+  const ds = useDataSource();
+  const key = useKey();
+  return useQuery({ queryKey: key("rewards"), queryFn: () => ds.listRewards() });
+}
+
+export function useTransferBonus() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { amount?: MinorUnits; idempotencyKey: string }) =>
+      ds.transferBonusToAvailable(input.amount, "NGN", input.idempotencyKey),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useRewardTasks() {
+  const ds = useDataSource();
+  const key = useKey();
+  return useQuery({ queryKey: key("reward-tasks"), queryFn: () => ds.listRewardTasks() });
+}
+
+export function useMyTaskClaims() {
+  const ds = useDataSource();
+  const key = useKey();
+  return useQuery({ queryKey: key("task-claims"), queryFn: () => ds.listMyTaskClaims() });
+}
+
+export function useClaimRewardTask() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      taskId: string;
+      idempotencyKey: string;
+      evidence?: Record<string, unknown>;
+    }) => ds.claimRewardTask(input),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useIdentityLink() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (provider: "TELEGRAM") => ds.createIdentityLink(provider),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
 export function useContent() {
   const ds = useDataSource();
   const key = useKey();
-  return useQuery({ queryKey: key("content"), queryFn: () => ds.getContent(), staleTime: Infinity });
+  return useQuery({
+    queryKey: key("content"),
+    queryFn: () => ds.getContent(),
+    staleTime: Infinity,
+  });
 }

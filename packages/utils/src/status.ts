@@ -85,4 +85,5 @@ export const REFERRAL_STATUS: Record<ReferralStatus, Entry> = {
   QUALIFIED: { tone: "success", label: "Qualified" },
   CREDITED: { tone: "success", label: "Credited" },
   DISQUALIFIED: { tone: "neutral", label: "Not eligible" },
+  BLOCKED: { tone: "warning", label: "Blocked" },
 };

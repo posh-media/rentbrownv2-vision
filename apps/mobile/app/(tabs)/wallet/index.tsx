@@ -7,7 +7,7 @@ import { formatBps, formatMoney } from "@rentbrown/utils";
 import { TransactionRow } from "../../../src/components/transaction-row";
 import { TransactionDetailSheet } from "../../../src/components/transaction-sheet";
 import { WalletBalanceCard } from "../../../src/components/wallet-balance-card";
-import { useTransactions, useWallet } from "../../../src/data/hooks";
+import { useTransactions, useTransferBonus, useWallet } from "../../../src/data/hooks";
 import { useSession } from "../../../src/data/provider";
 import { t } from "../../../src/theme";
 import {
@@ -30,6 +30,7 @@ export default function Wallet() {
   const session = useSession();
   const wallet = useWallet();
   const transactions = useTransactions();
+  const transferBonus = useTransferBonus();
   const { toast } = useToast();
   const [detail, setDetail] = React.useState<string | null>(null);
 
@@ -37,7 +38,11 @@ export default function Wallet() {
     return (
       <Screen bottomPad={110}>
         <HeaderBar large title="Wallet" />
-        <EmptyState title="Sign in to see your wallet" actionLabel="Sign in" onAction={() => router.push("/(auth)/login")} />
+        <EmptyState
+          title="Sign in to see your wallet"
+          actionLabel="Sign in"
+          onAction={() => router.push("/(auth)/login")}
+        />
       </Screen>
     );
   }
@@ -57,15 +62,34 @@ export default function Wallet() {
           <WalletBalanceCard wallet={w} />
           <View style={{ flexDirection: "row", gap: 10 }}>
             <View style={{ flex: 1 }}>
-              <Button size="lg" fullWidth label="Deposit" onPress={() => router.push("/(modals)/deposit")} />
+              <Button
+                size="lg"
+                fullWidth
+                label="Deposit"
+                onPress={() => router.push("/(modals)/deposit")}
+              />
             </View>
             <View style={{ flex: 1 }}>
-              <Button size="lg" fullWidth variant="outline" label="Withdraw" onPress={() => router.push("/(modals)/withdraw")} />
+              <Button
+                size="lg"
+                fullWidth
+                variant="outline"
+                label="Withdraw"
+                onPress={() => router.push("/(modals)/withdraw")}
+              />
             </View>
           </View>
 
           <Card padded={false} style={{ paddingVertical: 6 }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 14, paddingTop: 8 }}>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                paddingHorizontal: 14,
+                paddingTop: 8,
+              }}
+            >
               <Body style={{ fontWeight: "800" }}>Recent transactions</Body>
               <Caption tone="brand" onPress={() => router.push("/(tabs)/wallet/transactions")}>
                 View all
@@ -73,15 +97,21 @@ export default function Wallet() {
             </View>
             <View style={{ paddingHorizontal: 14 }}>
               {recent.length === 0 ? (
-                <Body style={{ paddingVertical: 12, color: t.text.secondary }}>No transactions yet.</Body>
+                <Body style={{ paddingVertical: 12, color: t.text.secondary }}>
+                  No transactions yet.
+                </Body>
               ) : (
-                recent.map((tx) => <TransactionRow key={tx.id} transaction={tx} onPress={() => setDetail(tx.id)} />)
+                recent.map((tx) => (
+                  <TransactionRow key={tx.id} transaction={tx} onPress={() => setDetail(tx.id)} />
+                ))
               )}
             </View>
           </Card>
 
           <Card padded={false} style={{ paddingVertical: 6 }}>
-            <Body style={{ fontWeight: "800", paddingHorizontal: 14, paddingTop: 8 }}>Payout methods</Body>
+            <Body style={{ fontWeight: "800", paddingHorizontal: 14, paddingTop: 8 }}>
+              Payout methods
+            </Body>
             {w.payoutMethods.map((m) => (
               <ListRow
                 key={m.id}
@@ -98,7 +128,12 @@ export default function Wallet() {
               />
             ))}
             <View style={{ paddingHorizontal: 14, paddingVertical: 8 }}>
-              <Button variant="outline" size="sm" label="Add bank account" onPress={() => toast("Coming in a later phase")} />
+              <Button
+                variant="outline"
+                size="sm"
+                label="Add bank account"
+                onPress={() => toast("Coming in a later phase")}
+              />
             </View>
           </Card>
 
@@ -108,16 +143,51 @@ export default function Wallet() {
               <Caption tone="muted">Bonus balance</Caption>
               <Body style={{ fontWeight: "800" }}>{formatMoney(w.balances.BONUS, w.currency)}</Body>
             </View>
-            <Button variant="outline" size="sm" label="Transfer to available" onPress={() => toast("Bonus transfer arrives with the backend")} />
+            <Button
+              variant="outline"
+              size="sm"
+              label="Transfer to available"
+              loading={transferBonus.isPending}
+              disabled={w.balances.BONUS <= 0}
+              onPress={() =>
+                transferBonus.mutate(
+                  { idempotencyKey: `${Date.now()}-${Math.random().toString(36).slice(2)}` },
+                  {
+                    onSuccess: (r) =>
+                      toast(
+                        `${formatMoney(r.releasedAmount, r.currency)} moved to available${r.replayed ? " (already applied)" : ""}`,
+                      ),
+                    onError: (e) =>
+                      toast(
+                        e instanceof Error ? e.message : "The transfer could not be completed.",
+                      ),
+                  },
+                )
+              }
+            />
           </Card>
 
           <Card>
             <Body style={{ fontWeight: "800", marginBottom: 4 }}>Fees & limits</Body>
-            <DataRow label="Withdrawal fee" value={`${formatBps(w.policies.withdrawalFeeBps)} capped at ${formatMoney(w.policies.withdrawalFeeCap, w.currency)}`} />
-            <DataRow label="Minimum withdrawal" value={formatMoney(w.policies.minWithdrawal, w.currency)} />
-            <DataRow label="Minimum deposit" value={formatMoney(w.policies.minDeposit, w.currency)} />
-            <DataRow label="Deposit fee" value={w.policies.depositFeeBps === 0 ? "None" : formatBps(w.policies.depositFeeBps)} />
-            {w.policies.kycRequiredForWithdrawal ? <DataRow label="Withdrawals" value="Identity verification required" /> : null}
+            <DataRow
+              label="Withdrawal fee"
+              value={`${formatBps(w.policies.withdrawalFeeBps)} capped at ${formatMoney(w.policies.withdrawalFeeCap, w.currency)}`}
+            />
+            <DataRow
+              label="Minimum withdrawal"
+              value={formatMoney(w.policies.minWithdrawal, w.currency)}
+            />
+            <DataRow
+              label="Minimum deposit"
+              value={formatMoney(w.policies.minDeposit, w.currency)}
+            />
+            <DataRow
+              label="Deposit fee"
+              value={w.policies.depositFeeBps === 0 ? "None" : formatBps(w.policies.depositFeeBps)}
+            />
+            {w.policies.kycRequiredForWithdrawal ? (
+              <DataRow label="Withdrawals" value="Identity verification required" />
+            ) : null}
           </Card>
         </>
       )}

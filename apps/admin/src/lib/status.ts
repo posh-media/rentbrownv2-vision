@@ -25,8 +25,30 @@ const REWARD_GRANT: Record<string, Entry> = {
   PENDING: { tone: "pending", label: "Pending" },
   QUALIFIED: { tone: "info", label: "Qualified" },
   CREDITED: { tone: "success", label: "Credited" },
+  PARTIALLY_REVERSED: { tone: "warning", label: "Partially reversed" },
   REVERSED: { tone: "neutral", label: "Reversed" },
   BLOCKED: { tone: "error", label: "Blocked" },
+};
+
+const RECEIVABLE: Record<string, Entry> = {
+  OPEN: { tone: "warning", label: "Open" },
+  SETTLED: { tone: "success", label: "Settled" },
+};
+
+const TASK_STATUS: Record<string, Entry> = {
+  DRAFT: { tone: "neutral", label: "Draft" },
+  PUBLISHED: { tone: "success", label: "Published" },
+  PAUSED: { tone: "warning", label: "Paused" },
+  ARCHIVED: { tone: "neutral", label: "Archived" },
+};
+
+const TASK_CLAIM: Record<string, Entry> = {
+  PENDING: { tone: "pending", label: "Pending" },
+  VERIFYING: { tone: "info", label: "Verifying" },
+  MANUAL_REVIEW: { tone: "warning", label: "Manual review" },
+  REWARDED: { tone: "success", label: "Rewarded" },
+  REJECTED: { tone: "error", label: "Rejected" },
+  EXPIRED: { tone: "neutral", label: "Expired" },
 };
 
 const DELIVERY: Record<string, Entry> = {
@@ -96,6 +118,9 @@ const maps: Array<Record<string, Entry>> = [
   REFERRAL_STATUS,
   PROPERTY_PUBLICATION,
   REWARD_GRANT,
+  RECEIVABLE,
+  TASK_STATUS,
+  TASK_CLAIM,
   DELIVERY,
   RECONCILIATION,
   AUDIT_RESULT,

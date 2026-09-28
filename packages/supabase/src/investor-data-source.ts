@@ -1,12 +1,16 @@
 import type {
   AuthGateway,
   BankAccountInput,
+  BonusReleaseResult,
+  CurrencyCode,
   DashboardSummary,
   DepositIntent,
   DepositOptions,
   DepositStatus,
   Duration,
   FundingSource,
+  IdentityLink,
+  IdentityProvider,
   Investment,
   InvestmentFilter,
   InvestmentQuote,
@@ -29,9 +33,17 @@ import type {
   ProofDocument,
   ProofDocumentStatus,
   ProofDocumentType,
+  ReferralRecord,
+  ReferralStatus,
+  ReferralSummary,
+  RewardRecord,
+  RewardTask,
   Session,
   SignInInput,
   SignUpInput,
+  TaskClaimRecord,
+  TaskClaimResult,
+  TaskRequirementView,
   Transaction,
   TransactionFilter,
   TransactionType,
@@ -68,7 +80,9 @@ async function invokeErrorMessage(error: unknown): Promise<string> {
     try {
       const body = (await ctx.json()) as { error?: string };
       if (body?.error) return body.error;
-    } catch { /* fall through */ }
+    } catch {
+      /* fall through */
+    }
   }
   return error instanceof Error ? error.message : "The deposit could not be started.";
 }
@@ -92,7 +106,8 @@ function investmentError(error: { message?: string }): Error {
     ERR_EMAIL_VERIFICATION_REQUIRED: "Verify your email address before investing.",
     ERR_FUNDING_SOURCE: "That funding method isn't available yet — use your wallet balance.",
     ERR_FEE_UNSUPPORTED: "This plan can't be purchased right now. Please contact support.",
-    ERR_INSUFFICIENT_BALANCE: "Your available balance can't cover this amount. Top up your wallet or choose fewer slots.",
+    ERR_INSUFFICIENT_BALANCE:
+      "Your available balance can't cover this amount. Top up your wallet or choose fewer slots.",
     ERR_ROUND_NOT_FOUND: "This round no longer exists.",
     ERR_ROUND_NOT_OPEN: "This round isn't open for investment.",
     ERR_ROUND_CAPACITY_EXCEEDED: "Not enough slots remain in this round.",
@@ -112,6 +127,14 @@ function investmentError(error: { message?: string }): Error {
     ERR_INCOMPLETE: "Complete every field and upload both documents before submitting.",
     ERR_KYC_STATE: "This submission can't be changed in its current state.",
     ERR_STORAGE: "The document couldn't be linked to your submission — try again.",
+    // Phase 9B — rewards & tasks
+    ERR_AMOUNT: "That amount isn't available to release.",
+    ERR_NO_DEPOSIT_HISTORY:
+      "Withdrawals require a funded deposit first. Bonus reward funds are exempt — release them to your available balance.",
+    ERR_TASK_NOT_FOUND: "That reward task no longer exists.",
+    ERR_TASK_NOT_AVAILABLE: "This task isn't open for claims right now.",
+    ERR_TASK_NOT_ELIGIBLE: "You don't meet this task's eligibility requirements yet.",
+    ERR_TASK_ALREADY_CLAIMED: "You've already claimed this task.",
     "insufficient available balance": "Your available balance can't cover this withdrawal.",
     "bank account not found": "That bank account is no longer saved — add it again.",
     "kyc submission not found": "Your verification draft was not found — start again.",
@@ -131,31 +154,65 @@ function investmentError(error: { message?: string }): Error {
 
 interface RawOpp {
   property: {
-    id: string; slug: string; name: string; property_type: string;
-    summary: string; description: string; area: string; city: string; state: string;
-    location_label: string; images: string[] | null;
-    operator_name: string; operator_description: string;
-    highlights: string[] | null; revenue_model: string;
+    id: string;
+    slug: string;
+    name: string;
+    property_type: string;
+    summary: string;
+    description: string;
+    area: string;
+    city: string;
+    state: string;
+    location_label: string;
+    images: string[] | null;
+    operator_name: string;
+    operator_description: string;
+    highlights: string[] | null;
+    revenue_model: string;
     documents: Array<{
-      id: string; document_type: ProofDocumentType; title: string; summary: string;
-      status: string; version: string; reviewed_at: string | null;
+      id: string;
+      document_type: ProofDocumentType;
+      title: string;
+      summary: string;
+      status: string;
+      version: string;
+      reviewed_at: string | null;
     }> | null;
     updates: Array<{ id: string; title: string; body: string; published_at: string }> | null;
   };
   plan: {
-    id: string; name: string; currency: "NGN" | "USD"; slot_price_minor: number;
-    roi_bps: number; duration_hours: number; min_slots: number;
-    max_slots_per_user: number | null; investment_fee_bps: number;
-    terms: string[] | null; risk_disclosures: string[] | null; status: "PUBLISHED" | "PAUSED" | "ARCHIVED";
+    id: string;
+    name: string;
+    currency: "NGN" | "USD";
+    slot_price_minor: number;
+    roi_bps: number;
+    duration_hours: number;
+    min_slots: number;
+    max_slots_per_user: number | null;
+    investment_fee_bps: number;
+    terms: string[] | null;
+    risk_disclosures: string[] | null;
+    status: "PUBLISHED" | "PAUSED" | "ARCHIVED";
   };
   round: {
-    id: string; round_number: number; status: string;
-    total_slots: number; allocated_slots: number; reserved_slots: number;
-    available_slots: number; allocated_pct: number;
-    opens_at: string; closes_at: string;
-    projected_start_at: string; projected_maturity_at: string;
+    id: string;
+    round_number: number;
+    status: string;
+    total_slots: number;
+    allocated_slots: number;
+    reserved_slots: number;
+    available_slots: number;
+    allocated_pct: number;
+    opens_at: string;
+    closes_at: string;
+    projected_start_at: string;
+    projected_maturity_at: string;
   };
-  per_slot: { principal_minor: number; expected_profit_minor: number; maturity_value_minor: number };
+  per_slot: {
+    principal_minor: number;
+    expected_profit_minor: number;
+    maturity_value_minor: number;
+  };
 }
 
 const DOC_STATUS: Record<string, ProofDocumentStatus> = {
@@ -173,26 +230,34 @@ function mapOpportunity(o: RawOpp): Opportunity {
       slug: o.property.slug,
       name: o.property.name,
       type: o.property.property_type,
-      location: { area: o.property.area, city: o.property.city, state: o.property.state, label: o.property.location_label },
+      location: {
+        area: o.property.area,
+        city: o.property.city,
+        state: o.property.state,
+        label: o.property.location_label,
+      },
       summary: o.property.summary,
       description: o.property.description,
       images: o.property.images ?? [],
       operator: { name: o.property.operator_name, description: o.property.operator_description },
       highlights: o.property.highlights ?? [],
       revenueModel: o.property.revenue_model,
-      proofDocuments: (o.property.documents ?? []).map(
-        (d): ProofDocument => ({
-          id: d.id,
-          type: d.document_type,
-          title: d.title,
-          summary: d.summary,
-          reviewedBy: d.status === "VERIFIED" ? "RentBrown review desk" : "Pending review",
-          reviewedAt: d.reviewed_at ?? "",
-          version: d.version,
-          status: DOC_STATUS[d.status] ?? "PENDING_REVIEW",
-        }),
-      ),
-      updates: (o.property.updates ?? []).map((u) => ({ id: u.id, title: u.title, body: u.body, publishedAt: u.published_at })),
+      proofDocuments: (o.property.documents ?? []).map((d): ProofDocument => ({
+        id: d.id,
+        type: d.document_type,
+        title: d.title,
+        summary: d.summary,
+        reviewedBy: d.status === "VERIFIED" ? "RentBrown review desk" : "Pending review",
+        reviewedAt: d.reviewed_at ?? "",
+        version: d.version,
+        status: DOC_STATUS[d.status] ?? "PENDING_REVIEW",
+      })),
+      updates: (o.property.updates ?? []).map((u) => ({
+        id: u.id,
+        title: u.title,
+        body: u.body,
+        publishedAt: u.published_at,
+      })),
     },
     plan: {
       id: o.plan.id,
@@ -240,27 +305,53 @@ function applyOpportunityFilter(items: Opportunity[], filter?: OpportunityFilter
   }
   if (filter?.query) {
     const q = filter.query.toLowerCase();
-    result = result.filter((o) => `${o.property.name} ${o.property.location.label} ${o.plan.name}`.toLowerCase().includes(q));
+    result = result.filter((o) =>
+      `${o.property.name} ${o.property.location.label} ${o.plan.name}`.toLowerCase().includes(q),
+    );
   }
   const sorted = [...result];
   switch (filter?.sort) {
-    case "CLOSING_SOON": sorted.sort((a, b) => a.round.closesAt.localeCompare(b.round.closesAt)); break;
-    case "ROI": sorted.sort((a, b) => b.plan.roiBps - a.plan.roiBps); break;
-    case "SLOT_PRICE": sorted.sort((a, b) => a.plan.slotPrice - b.plan.slotPrice); break;
-    default: sorted.sort((a, b) => b.round.opensAt.localeCompare(a.round.opensAt));
+    case "CLOSING_SOON":
+      sorted.sort((a, b) => a.round.closesAt.localeCompare(b.round.closesAt));
+      break;
+    case "ROI":
+      sorted.sort((a, b) => b.plan.roiBps - a.plan.roiBps);
+      break;
+    case "SLOT_PRICE":
+      sorted.sort((a, b) => a.plan.slotPrice - b.plan.slotPrice);
+      break;
+    default:
+      sorted.sort((a, b) => b.round.opensAt.localeCompare(a.round.opensAt));
   }
   return sorted;
 }
 
 interface RawQuote {
-  round_id: string; slots: number; slot_price_minor: number;
-  principal_minor: number; roi_bps: number; expected_profit_minor: number;
-  maturity_value_minor: number; fee_minor: number; currency: "NGN" | "USD";
-  duration_hours: number; min_slots: number; max_slots: number; available_slots: number;
-  round_status: string; round_open: boolean;
-  projected_start_at: string; projected_maturity_at: string;
-  funding_options: Array<{ source: FundingSource; available: boolean; reason?: string; wallet_available_minor?: number }>;
-  quoted_at: string; expires_at: string;
+  round_id: string;
+  slots: number;
+  slot_price_minor: number;
+  principal_minor: number;
+  roi_bps: number;
+  expected_profit_minor: number;
+  maturity_value_minor: number;
+  fee_minor: number;
+  currency: "NGN" | "USD";
+  duration_hours: number;
+  min_slots: number;
+  max_slots: number;
+  available_slots: number;
+  round_status: string;
+  round_open: boolean;
+  projected_start_at: string;
+  projected_maturity_at: string;
+  funding_options: Array<{
+    source: FundingSource;
+    available: boolean;
+    reason?: string;
+    wallet_available_minor?: number;
+  }>;
+  quoted_at: string;
+  expires_at: string;
 }
 
 function mapQuote(q: RawQuote): InvestmentQuote {
@@ -297,11 +388,22 @@ function mapQuote(q: RawQuote): InvestmentQuote {
 }
 
 interface RawInvestmentRow {
-  id: string; reference: string; round_id: string;
-  status: InvestmentStatus; currency: "NGN" | "USD"; funding_source: FundingSource;
-  slots: number; slot_price_minor: number; principal_minor: number; roi_bps: number;
-  duration_hours: number; expected_profit_minor: number; maturity_value_minor: number;
-  activated_at: string | null; matures_at: string | null; completed_at: string | null;
+  id: string;
+  reference: string;
+  round_id: string;
+  status: InvestmentStatus;
+  currency: "NGN" | "USD";
+  funding_source: FundingSource;
+  slots: number;
+  slot_price_minor: number;
+  principal_minor: number;
+  roi_bps: number;
+  duration_hours: number;
+  expected_profit_minor: number;
+  maturity_value_minor: number;
+  activated_at: string | null;
+  matures_at: string | null;
+  completed_at: string | null;
   created_at: string;
   property: { slug: string; name: string; location_label: string; images: string[] | null } | null;
   plan: { name: string } | null;
@@ -309,8 +411,11 @@ interface RawInvestmentRow {
 }
 
 interface RawEventRow {
-  id: string; investment_id: string; event_type: string;
-  created_at: string; metadata: { note?: string } | null;
+  id: string;
+  investment_id: string;
+  event_type: string;
+  created_at: string;
+  metadata: { note?: string } | null;
 }
 
 const EVENT_LABEL: Record<string, string> = {
@@ -333,15 +438,25 @@ function buildTimeline(row: RawInvestmentRow, events: RawEventRow[]): Investment
     .filter((e) => e.event_type !== "NOTE_ADDED" || e.metadata?.note)
     .map((e) => ({
       id: e.id,
-      label: e.metadata?.note && e.event_type === "NOTE_ADDED" ? `Note — ${e.metadata.note}` : EVENT_LABEL[e.event_type] ?? e.event_type,
+      label:
+        e.metadata?.note && e.event_type === "NOTE_ADDED"
+          ? `Note — ${e.metadata.note}`
+          : (EVENT_LABEL[e.event_type] ?? e.event_type),
       at: e.created_at,
       state: "done" as const,
     }));
   // Projected milestones so the detail page keeps its forward-looking rail.
-  if (row.matures_at && !["COMPLETED", "SETTLING"].includes(row.status) && !events.some((e) => e.event_type === "MATURED")) {
+  if (
+    row.matures_at &&
+    !["COMPLETED", "SETTLING"].includes(row.status) &&
+    !events.some((e) => e.event_type === "MATURED")
+  ) {
     timeline.push({ id: "maturity", label: "Maturity", at: row.matures_at, state: "upcoming" });
   }
-  if (!["COMPLETED", "FAILED", "REFUNDED"].includes(row.status) && !events.some((e) => e.event_type === "SETTLED")) {
+  if (
+    !["COMPLETED", "FAILED", "REFUNDED"].includes(row.status) &&
+    !events.some((e) => e.event_type === "SETTLED")
+  ) {
     timeline.push({ id: "settle", label: "Settlement to wallet", at: null, state: "upcoming" });
   }
   return timeline;
@@ -395,7 +510,12 @@ const PAYMENT_STATUS: Record<string, PaymentStatus> = {
   REFUNDED: "REFUNDED",
 };
 
-function mapSubmission(row: Pick<RawInvestmentRow, "id" | "reference" | "status" | "funding_source" | "principal_minor" | "currency" | "created_at">): InvestmentSubmission {
+function mapSubmission(
+  row: Pick<
+    RawInvestmentRow,
+    "id" | "reference" | "status" | "funding_source" | "principal_minor" | "currency" | "created_at"
+  >,
+): InvestmentSubmission {
   return {
     reference: row.reference,
     investmentId: row.id,
@@ -410,7 +530,13 @@ function mapSubmission(row: Pick<RawInvestmentRow, "id" | "reference" | "status"
 const INVESTMENT_SELECT =
   "*, property:properties!inner(slug,name,location_label,images), plan:investment_plans!inner(name), round:investment_rounds!inner(round_number)";
 
-const ACTIVE_STATUSES: InvestmentStatus[] = ["ACTIVE", "PAYMENT_PENDING", "MATURITY_DUE", "SETTLING", "REVIEW_REQUIRED"];
+const ACTIVE_STATUSES: InvestmentStatus[] = [
+  "ACTIVE",
+  "PAYMENT_PENDING",
+  "MATURITY_DUE",
+  "SETTLING",
+  "REVIEW_REQUIRED",
+];
 const MATURED_STATUSES: InvestmentStatus[] = ["COMPLETED", "REFUNDED", "FAILED"];
 
 // journal_type → wire TransactionType. HOLD/HOLD_DEBIT direction depends on the
@@ -450,11 +576,19 @@ const JOURNAL_TITLE: Record<string, string> = {
 };
 
 interface RawTxRow {
-  entry_id: number; journal_id: string; reference: string;
-  journal_type: string; bucket: WalletAccountType; direction: "CREDIT" | "DEBIT";
-  amount_minor: number; currency: "NGN" | "USD"; description: string | null;
-  entity_type: string | null; entity_id: string | null;
-  balance_after_minor: number | null; occurred_at: string;
+  entry_id: number;
+  journal_id: string;
+  reference: string;
+  journal_type: string;
+  bucket: WalletAccountType;
+  direction: "CREDIT" | "DEBIT";
+  amount_minor: number;
+  currency: "NGN" | "USD";
+  description: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  balance_after_minor: number | null;
+  occurred_at: string;
 }
 
 function txType(row: RawTxRow): TransactionType {
@@ -466,7 +600,10 @@ function txType(row: RawTxRow): TransactionType {
 
 function mapTransaction(row: RawTxRow): Transaction {
   const related =
-    row.entity_type === "investment" || row.entity_type === "deposit" || row.entity_type === "withdrawal" || row.entity_type === "referral"
+    row.entity_type === "investment" ||
+    row.entity_type === "deposit" ||
+    row.entity_type === "withdrawal" ||
+    row.entity_type === "referral"
       ? ({ kind: row.entity_type, id: row.entity_id ?? "" } as Transaction["related"])
       : undefined;
   return {
@@ -488,13 +625,239 @@ function mapTransaction(row: RawTxRow): Transaction {
 
 function applyTransactionFilter(items: Transaction[], filter?: TransactionFilter): Transaction[] {
   let result = items;
-  if (filter?.type && filter.type !== "ALL") result = result.filter((t) => (filter.type as string[]).includes(t.type));
-  if (filter?.status && filter.status !== "ALL") result = result.filter((t) => (filter.status as string[]).includes(t.status));
+  if (filter?.type && filter.type !== "ALL")
+    result = result.filter((t) => (filter.type as string[]).includes(t.type));
+  if (filter?.status && filter.status !== "ALL")
+    result = result.filter((t) => (filter.status as string[]).includes(t.status));
   if (filter?.query) {
     const q = filter.query.toLowerCase();
-    result = result.filter((t) => `${t.title} ${t.reference} ${t.description}`.toLowerCase().includes(q));
+    result = result.filter((t) =>
+      `${t.title} ${t.reference} ${t.description}`.toLowerCase().includes(q),
+    );
   }
   return result;
+}
+
+// ── Phase 9B: referrals, rewards, task rewards ────────────────────────────────
+
+interface RawReferralSummary {
+  code: string;
+  share_url: string;
+  stats: { joined?: number; qualified?: number; credited?: number; total?: number };
+  rewards: Array<{ currency: string; issued_minor: number; pending_minor: number }>;
+  policy: {
+    signup_reward_minor_ngn?: number;
+    qualifying_deposit_minor_ngn?: number;
+    deposit_reward_bps?: number;
+    deposit_reward_cap_minor_ngn?: number;
+  };
+  qualification_steps?: string[];
+  rules?: string[];
+}
+
+interface RawReferralRow {
+  id: string;
+  referred_display_name: string;
+  status: ReferralStatus;
+  qualified_at: string | null;
+  credited_at: string | null;
+  created_at: string;
+  rewards: Array<{
+    id: string;
+    kind: string;
+    status: string;
+    amount_minor: number;
+    issued_minor: number;
+    currency: string;
+  }>;
+}
+
+interface RawRewardGrant {
+  id: string;
+  kind: RewardRecord["kind"];
+  status: RewardRecord["status"];
+  currency: CurrencyCode;
+  face_minor: number;
+  issued_minor: number;
+  bonus_minor: number;
+  released_minor: number;
+  reserved_minor: number;
+  consumed_minor: number;
+  reversed_minor: number;
+  referral_id: string | null;
+  deposit_id: string | null;
+  task_claim_id: string | null;
+  created_at: string;
+  movements: Array<{
+    movement: RewardRecord["movements"][number]["movement"];
+    bucket: "BONUS" | "RELEASED" | null;
+    amount_minor: number;
+    at: string;
+  }>;
+}
+
+interface RawRewardTask {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  status: RewardTask["status"];
+  reward_amount_minor: number;
+  reward_currency: CurrencyCode;
+  claim_policy: RewardTask["claimPolicy"];
+  eligibility: Record<string, unknown>;
+  requirements: Array<{
+    id: string;
+    kind: TaskRequirementView["kind"];
+    config: Record<string, unknown>;
+    required: boolean;
+  }>;
+  my_claim: { id: string; status: TaskClaimRecord["status"]; created_at: string } | null;
+}
+
+interface RawTaskClaim {
+  id: string;
+  task_id: string;
+  task_title: string;
+  task_slug: string;
+  status: TaskClaimRecord["status"];
+  reward_amount_minor: number;
+  reward_currency: CurrencyCode;
+  claim_deadline: string | null;
+  resolved_at: string | null;
+  created_at: string;
+  legs: Array<{
+    requirement_id: string;
+    kind: TaskRequirementView["kind"];
+    status: TaskClaimRecord["legs"][number]["status"];
+    verified_at: string | null;
+    detail: Record<string, unknown>;
+  }>;
+}
+
+const REFERRAL_STATUS_NOTE: Record<ReferralStatus, string> = {
+  JOINED: "Signed up — verification not started",
+  PENDING: "Verification in progress",
+  QUALIFIED: "Qualified — reward pending credit",
+  CREDITED: "Rewards credited to bonus balance",
+  DISQUALIFIED: "Did not qualify",
+  BLOCKED: "Under review",
+};
+
+function mapReferralSummary(raw: RawReferralSummary): ReferralSummary {
+  const ngn = raw.rewards.find((r) => r.currency === "NGN");
+  return {
+    code: raw.code,
+    shareUrl: raw.share_url,
+    referredCount: raw.stats.total ?? 0,
+    pendingRewards: ngn?.pending_minor ?? 0,
+    qualifiedRewards: ngn?.issued_minor ?? 0,
+    earnedRewards: ngn?.issued_minor ?? 0,
+    currency: "NGN",
+    policy: {
+      version: "live",
+      currency: "NGN",
+      signupReward: raw.policy.signup_reward_minor_ngn ?? 0,
+      qualifyingDeposit: raw.policy.qualifying_deposit_minor_ngn ?? 0,
+      depositReferralBps: raw.policy.deposit_reward_bps ?? 0,
+      depositReferralCap: raw.policy.deposit_reward_cap_minor_ngn ?? 0,
+      qualificationRule: (raw.qualification_steps ?? []).join(" "),
+    },
+    rules: raw.rules ?? [],
+    qualificationSteps: raw.qualification_steps ?? [],
+  };
+}
+
+function mapReferral(raw: RawReferralRow): ReferralRecord {
+  const signup = raw.rewards.find((r) => r.kind === "REFERRAL_SIGNUP");
+  const deposits = raw.rewards
+    .filter((r) => r.kind === "REFERRAL_DEPOSIT")
+    .reduce((s, r) => s + r.issued_minor, 0);
+  const signupReward = signup?.amount_minor ?? 0;
+  return {
+    id: raw.id,
+    displayName: raw.referred_display_name,
+    joinedAt: raw.created_at,
+    status: raw.status,
+    signupReward,
+    depositRewards: deposits,
+    rewardAmount: signupReward + deposits,
+    currency: "NGN",
+    statusNote: REFERRAL_STATUS_NOTE[raw.status] ?? "",
+    qualifiedAt: raw.qualified_at,
+    creditedAt: raw.credited_at,
+  };
+}
+
+function mapReward(raw: RawRewardGrant): RewardRecord {
+  return {
+    id: raw.id,
+    kind: raw.kind,
+    status: raw.status,
+    currency: raw.currency,
+    faceAmount: raw.face_minor,
+    issuedAmount: raw.issued_minor,
+    bonusAmount: raw.bonus_minor,
+    releasedAmount: raw.released_minor,
+    reservedAmount: raw.reserved_minor,
+    consumedAmount: raw.consumed_minor,
+    reversedAmount: raw.reversed_minor,
+    referralId: raw.referral_id,
+    depositId: raw.deposit_id,
+    taskClaimId: raw.task_claim_id,
+    createdAt: raw.created_at,
+    movements: raw.movements.map((m) => ({
+      movement: m.movement,
+      bucket: m.bucket,
+      amount: m.amount_minor,
+      at: m.at,
+    })),
+  };
+}
+
+function mapRewardTask(raw: RawRewardTask): RewardTask {
+  return {
+    id: raw.id,
+    slug: raw.slug,
+    title: raw.title,
+    description: raw.description,
+    status: raw.status,
+    rewardAmount: raw.reward_amount_minor,
+    rewardCurrency: raw.reward_currency,
+    claimPolicy: raw.claim_policy,
+    eligibility: raw.eligibility,
+    requirements: raw.requirements.map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      config: r.config,
+      required: r.required,
+    })),
+    myClaim: raw.my_claim
+      ? { id: raw.my_claim.id, status: raw.my_claim.status, createdAt: raw.my_claim.created_at }
+      : null,
+  };
+}
+
+function mapTaskClaim(raw: RawTaskClaim): TaskClaimRecord {
+  return {
+    id: raw.id,
+    taskId: raw.task_id,
+    taskTitle: raw.task_title,
+    taskSlug: raw.task_slug,
+    status: raw.status,
+    rewardAmount: raw.reward_amount_minor,
+    rewardCurrency: raw.reward_currency,
+    claimDeadline: raw.claim_deadline,
+    resolvedAt: raw.resolved_at,
+    createdAt: raw.created_at,
+    legs: raw.legs.map((l) => ({
+      requirementId: l.requirement_id,
+      kind: l.kind,
+      status: l.status,
+      verifiedAt: l.verified_at,
+      detail: l.detail,
+    })),
+  };
 }
 
 /**
@@ -530,7 +893,10 @@ export function createSupabaseInvestorDataSource(
   };
 
   const fetchInvestments = async (filter?: InvestmentFilter): Promise<Investment[]> => {
-    let query = client.from("investments").select(INVESTMENT_SELECT).order("created_at", { ascending: false });
+    let query = client
+      .from("investments")
+      .select(INVESTMENT_SELECT)
+      .order("created_at", { ascending: false });
     if (filter?.status === "ACTIVE") query = query.in("status", ACTIVE_STATUSES);
     if (filter?.status === "MATURED") query = query.in("status", MATURED_STATUSES);
     const { data, error } = await query;
@@ -540,7 +906,10 @@ export function createSupabaseInvestorDataSource(
     const { data: events, error: evErr } = await client
       .from("investment_events")
       .select("id,investment_id,event_type,created_at,metadata")
-      .in("investment_id", rows.map((r) => r.id))
+      .in(
+        "investment_id",
+        rows.map((r) => r.id),
+      )
       .order("created_at", { ascending: true });
     if (evErr) throw investmentError(evErr);
     const byInv = new Map<string, RawEventRow[]>();
@@ -566,8 +935,11 @@ export function createSupabaseInvestorDataSource(
     if (error) throw investmentError(error);
     if (!data) return shell;
     const w = data as {
-      available_minor: number; reserved_minor: number; bonus_minor: number;
-      pending_minor: number; updated_at: string;
+      available_minor: number;
+      reserved_minor: number;
+      bonus_minor: number;
+      pending_minor: number;
+      updated_at: string;
     };
     const balances: WalletSummary["balances"] = {
       AVAILABLE: w.available_minor,
@@ -681,7 +1053,10 @@ export function createSupabaseInvestorDataSource(
     blocked_reason: string | null;
   }
 
-  const fetchWithdrawalQuote = async (amount: number, destinationId?: string): Promise<WithdrawalQuote> => {
+  const fetchWithdrawalQuote = async (
+    amount: number,
+    destinationId?: string,
+  ): Promise<WithdrawalQuote> => {
     const { data, error } = await client.rpc("quote_withdrawal", {
       p_amount_minor: amount,
       p_bank_account_id: destinationId ?? null,
@@ -745,7 +1120,13 @@ export function createSupabaseInvestorDataSource(
   }
 
   /** Canonical forward rail for the status page's progress timeline. */
-  const WD_RAIL: WithdrawalStatus[] = ["REQUESTED", "UNDER_REVIEW", "APPROVED", "PROCESSING", "COMPLETED"];
+  const WD_RAIL: WithdrawalStatus[] = [
+    "REQUESTED",
+    "UNDER_REVIEW",
+    "APPROVED",
+    "PROCESSING",
+    "COMPLETED",
+  ];
 
   const mapWithdrawalDestination = (row: RawWithdrawalRow): PayoutMethod => {
     const d = row.destination ?? {};
@@ -771,9 +1152,12 @@ export function createSupabaseInvestorDataSource(
     const terminal = ["COMPLETED", "REJECTED", "FAILED"].includes(row.status);
     if (!terminal) {
       const reached = new Set(timeline.map((t) => t.status));
-      for (const s of WD_RAIL) if (!reached.has(s)) timeline.push({ status: s, at: null, note: undefined });
+      for (const s of WD_RAIL)
+        if (!reached.has(s)) timeline.push({ status: s, at: null, note: undefined });
     }
-    const rejected = [...events].reverse().find((e) => e.to_status === "REJECTED" || e.to_status === "FAILED");
+    const rejected = [...events]
+      .reverse()
+      .find((e) => e.to_status === "REJECTED" || e.to_status === "FAILED");
     return {
       id: row.id,
       reference: row.reference,
@@ -793,7 +1177,9 @@ export function createSupabaseInvestorDataSource(
   const WD_SELECT =
     "id,reference,currency,amount_minor,fee_minor,net_minor,destination,status,requested_at,reviewed_at,paid_at,rejected_at";
 
-  const fetchWithdrawalEvents = async (ids: string[]): Promise<Map<string, RawWithdrawalEvent[]>> => {
+  const fetchWithdrawalEvents = async (
+    ids: string[],
+  ): Promise<Map<string, RawWithdrawalEvent[]>> => {
     if (ids.length === 0) return new Map();
     const { data, error } = await client
       .from("withdrawal_events")
@@ -811,7 +1197,11 @@ export function createSupabaseInvestorDataSource(
   };
 
   const fetchWithdrawal = async (id: string): Promise<Withdrawal | null> => {
-    const { data, error } = await client.from("withdrawals").select(WD_SELECT).eq("id", id).maybeSingle();
+    const { data, error } = await client
+      .from("withdrawals")
+      .select(WD_SELECT)
+      .eq("id", id)
+      .maybeSingle();
     if (error) throw investmentError(error);
     if (!data) return null;
     const row = data as unknown as RawWithdrawalRow;
@@ -851,20 +1241,48 @@ export function createSupabaseInvestorDataSource(
 
   const kycSteps = (status: KycStatus, s: RawKycSubmission | null): KycStep[] => {
     const defs: Array<{ id: KycStep["id"]; title: string; description: string; done: boolean }> = [
-      { id: "PERSONAL", title: "Personal details", description: "Your full legal name and gender.", done: !!s?.full_legal_name && !!s?.gender },
-      { id: "IDENTITY", title: "Bank Verification Number", description: "Your 11-digit BVN.", done: !!s?.bvn_masked },
-      { id: "ADDRESS", title: "Proof of address", description: "A recent utility bill or bank statement.", done: !!s?.poa_type && !!s?.has_poa },
-      { id: "SELFIE", title: "Selfie photo", description: "A clear photo of your face.", done: !!s?.has_selfie },
+      {
+        id: "PERSONAL",
+        title: "Personal details",
+        description: "Your full legal name and gender.",
+        done: !!s?.full_legal_name && !!s?.gender,
+      },
+      {
+        id: "IDENTITY",
+        title: "Bank Verification Number",
+        description: "Your 11-digit BVN.",
+        done: !!s?.bvn_masked,
+      },
+      {
+        id: "ADDRESS",
+        title: "Proof of address",
+        description: "A recent utility bill or bank statement.",
+        done: !!s?.poa_type && !!s?.has_poa,
+      },
+      {
+        id: "SELFIE",
+        title: "Selfie photo",
+        description: "A clear photo of your face.",
+        done: !!s?.has_selfie,
+      },
     ];
     if (status === "VERIFIED" || status === "PENDING_REVIEW") {
-      return defs.map((d) => ({ id: d.id, title: d.title, description: d.description, state: "complete" as const }));
+      return defs.map((d) => ({
+        id: d.id,
+        title: d.title,
+        description: d.description,
+        state: "complete" as const,
+      }));
     }
     let currentSet = false;
     return defs.map(({ done, ...d }) => {
       if (done) return { ...d, state: "complete" as const };
       if (!currentSet) {
         currentSet = true;
-        return { ...d, state: status === "REJECTED" ? ("action_required" as const) : ("current" as const) };
+        return {
+          ...d,
+          state: status === "REJECTED" ? ("action_required" as const) : ("current" as const),
+        };
       }
       return { ...d, state: "upcoming" as const };
     });
@@ -930,7 +1348,9 @@ export function createSupabaseInvestorDataSource(
       const result = await auth.signUp(input);
       if (result.requiresEmailConfirmation) {
         // No session exists yet — the caller routes to the verify-email state.
-        throw Object.assign(new Error("EMAIL_CONFIRMATION_REQUIRED"), { code: "EMAIL_CONFIRMATION_REQUIRED" });
+        throw Object.assign(new Error("EMAIL_CONFIRMATION_REQUIRED"), {
+          code: "EMAIL_CONFIRMATION_REQUIRED",
+        });
       }
       const state = await auth.getAuthState();
       if (!state) throw new Error("Sign up did not produce a session.");
@@ -956,7 +1376,11 @@ export function createSupabaseInvestorDataSource(
       if (error) throw investmentError(error);
       return fetchKyc();
     },
-    async uploadKycDocument(kind: KycDocumentKind, file: Blob, fileName?: string): Promise<KycSummary> {
+    async uploadKycDocument(
+      kind: KycDocumentKind,
+      file: Blob,
+      fileName?: string,
+    ): Promise<KycSummary> {
       if (!(await hasSession())) return domain.uploadKycDocument(kind, file, fileName);
       const own = await fetchKycOwn();
       const sub = own.submission;
@@ -967,10 +1391,13 @@ export function createSupabaseInvestorDataSource(
         data: { user },
       } = await client.auth.getUser();
       if (!user) throw new Error("Sign in to continue.");
-      const ext = (fileName?.split(".").pop() ?? "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+      const ext =
+        (fileName?.split(".").pop() ?? "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
       const docName = kind === "SELFIE" ? "selfie" : "poa";
       const path = `${user.id}/${sub.id}/${docName}.${ext}`;
-      const { error: upErr } = await client.storage.from("kyc-documents").upload(path, file, { upsert: true });
+      const { error: upErr } = await client.storage
+        .from("kyc-documents")
+        .upload(path, file, { upsert: true });
       if (upErr) throw investmentError(upErr);
       const { error } = await client.rpc("kyc_save_draft", {
         [kind === "SELFIE" ? "p_selfie_path" : "p_poa_path"]: path,
@@ -1012,9 +1439,17 @@ export function createSupabaseInvestorDataSource(
       const completed = investments.filter((i) => i.status === "COMPLETED");
       const activePrincipal = active.reduce((s, i) => s + i.principal, 0);
       const expectedProfitActive = active.reduce((s, i) => s + i.expectedProfit, 0);
-      const walletTotal = wallet.balances.AVAILABLE + wallet.balances.RESERVED + wallet.balances.BONUS + wallet.balances.PENDING;
-      const next = active.filter((i) => i.maturesAt).sort((a, b) => a.maturesAt!.localeCompare(b.maturesAt!))[0];
-      const open = opportunities.filter((o) => o.round.status === "OPEN" || o.round.status === "NEARING_CAPACITY");
+      const walletTotal =
+        wallet.balances.AVAILABLE +
+        wallet.balances.RESERVED +
+        wallet.balances.BONUS +
+        wallet.balances.PENDING;
+      const next = active
+        .filter((i) => i.maturesAt)
+        .sort((a, b) => a.maturesAt!.localeCompare(b.maturesAt!))[0];
+      const open = opportunities.filter(
+        (o) => o.round.status === "OPEN" || o.round.status === "NEARING_CAPACITY",
+      );
       return {
         ...shell,
         greetingName: profile.displayName.split(/\s+/)[0] || shell.greetingName,
@@ -1059,7 +1494,10 @@ export function createSupabaseInvestorDataSource(
     // ── checkout — real (Phase 6B) ──────────────────────────────────────────
     async quoteInvestment(roundId: string, slots: number): Promise<InvestmentQuote> {
       if (!(await hasSession())) return domain.quoteInvestment(roundId, slots);
-      const { data, error } = await client.rpc("investment_quote", { p_round_id: roundId, p_slots: slots });
+      const { data, error } = await client.rpc("investment_quote", {
+        p_round_id: roundId,
+        p_slots: slots,
+      });
       if (error) throw investmentError(error);
       return mapQuote(data as RawQuote);
     },
@@ -1110,23 +1548,37 @@ export function createSupabaseInvestorDataSource(
     getWallet: () => hasSession().then((ok) => (ok ? fetchWalletSummary() : domain.getWallet())),
     listTransactions: (filter?: TransactionFilter) =>
       hasSession().then(async (ok) =>
-        ok ? applyTransactionFilter(await fetchTransactions(), filter) : domain.listTransactions(filter),
+        ok
+          ? applyTransactionFilter(await fetchTransactions(), filter)
+          : domain.listTransactions(filter),
       ),
     async getTransaction(id: string) {
       if (!(await hasSession())) return domain.getTransaction(id);
       const entryId = Number(id.replace(/^tx-/, ""));
       const { data, error } = await client
         .from("ledger_entries")
-        .select("id,direction,amount_minor,balance_after_minor,created_at, account:ledger_accounts!inner(bucket), journal:journal_entries!inner(reference,journal_type,currency,description,entity_type,entity_id)")
+        .select(
+          "id,direction,amount_minor,balance_after_minor,created_at, account:ledger_accounts!inner(bucket), journal:journal_entries!inner(reference,journal_type,currency,description,entity_type,entity_id)",
+        )
         .eq("id", entryId)
         .maybeSingle();
       if (error) throw investmentError(error);
       if (!data) return null;
       const e = data as unknown as {
-        id: number; direction: "CREDIT" | "DEBIT"; amount_minor: number;
-        balance_after_minor: number | null; created_at: string;
+        id: number;
+        direction: "CREDIT" | "DEBIT";
+        amount_minor: number;
+        balance_after_minor: number | null;
+        created_at: string;
         account: { bucket: WalletAccountType };
-        journal: { reference: string; journal_type: string; currency: "NGN" | "USD"; description: string | null; entity_type: string | null; entity_id: string | null };
+        journal: {
+          reference: string;
+          journal_type: string;
+          currency: "NGN" | "USD";
+          description: string | null;
+          entity_type: string | null;
+          entity_id: string | null;
+        };
       };
       return mapTransaction({
         entry_id: e.id,
@@ -1206,7 +1658,9 @@ export function createSupabaseInvestorDataSource(
     async getDeposit(id) {
       const row = await client
         .from("deposits")
-        .select("id,reference,status,provider,amount_minor,currency,created_at,confirmed_at,metadata")
+        .select(
+          "id,reference,status,provider,amount_minor,currency,created_at,confirmed_at,metadata",
+        )
         .eq("id", id)
         .maybeSingle();
       if (row.error || !row.data) return domain.getDeposit(id);
@@ -1237,7 +1691,11 @@ export function createSupabaseInvestorDataSource(
     },
     // ── withdrawals — real (Phase 8B): server quote, PIN + KYC gates ─────────
     quoteWithdrawal: (amount, destinationId) =>
-      hasSession().then((ok) => (ok ? fetchWithdrawalQuote(amount, destinationId) : domain.quoteWithdrawal(amount, destinationId))),
+      hasSession().then((ok) =>
+        ok
+          ? fetchWithdrawalQuote(amount, destinationId)
+          : domain.quoteWithdrawal(amount, destinationId),
+      ),
     async requestWithdrawal(input) {
       if (!(await hasSession())) return domain.requestWithdrawal(input);
       // PIN verification is its own committed RPC — request_withdrawal never
@@ -1271,10 +1729,14 @@ export function createSupabaseInvestorDataSource(
         },
       ]);
     },
-    getWithdrawal: (id) => hasSession().then((ok) => (ok ? fetchWithdrawal(id) : domain.getWithdrawal(id))),
+    getWithdrawal: (id) =>
+      hasSession().then((ok) => (ok ? fetchWithdrawal(id) : domain.getWithdrawal(id))),
     async listWithdrawals(): Promise<Withdrawal[]> {
       if (!(await hasSession())) return domain.listWithdrawals();
-      const { data, error } = await client.from("withdrawals").select(WD_SELECT).order("requested_at", { ascending: false });
+      const { data, error } = await client
+        .from("withdrawals")
+        .select(WD_SELECT)
+        .order("requested_at", { ascending: false });
       if (error) throw investmentError(error);
       const rows = (data ?? []) as unknown as RawWithdrawalRow[];
       const events = await fetchWithdrawalEvents(rows.map((r) => r.id));
@@ -1302,8 +1764,99 @@ export function createSupabaseInvestorDataSource(
       const { error } = await client.rpc("set_default_bank_account", { p_id: id });
       if (error) throw investmentError(error);
     },
-    getReferralSummary: () => domain.getReferralSummary(),
-    listReferrals: () => domain.listReferrals(),
+    // ── referrals & rewards — real (Phase 9B) ────────────────────────────────
+    async getReferralSummary(): Promise<ReferralSummary> {
+      if (!(await hasSession())) return domain.getReferralSummary();
+      const { data, error } = await client.rpc("get_referral_summary");
+      if (error) throw investmentError(error);
+      return mapReferralSummary(data as RawReferralSummary);
+    },
+    async listReferrals(): Promise<ReferralRecord[]> {
+      if (!(await hasSession())) return domain.listReferrals();
+      const { data, error } = await client.rpc("list_my_referrals");
+      if (error) throw investmentError(error);
+      return ((data ?? []) as RawReferralRow[]).map(mapReferral);
+    },
+    async listRewards(): Promise<RewardRecord[]> {
+      if (!(await hasSession())) return domain.listRewards();
+      const { data, error } = await client.rpc("list_my_rewards");
+      if (error) throw investmentError(error);
+      return ((data ?? []) as RawRewardGrant[]).map(mapReward);
+    },
+    async transferBonusToAvailable(
+      amount,
+      currency = "NGN",
+      idempotencyKey,
+    ): Promise<BonusReleaseResult> {
+      if (!(await hasSession()))
+        return domain.transferBonusToAvailable(amount, currency, idempotencyKey);
+      const { data, error } = await client.rpc("transfer_bonus_to_available", {
+        p_amount_minor: amount ?? null,
+        p_currency: currency,
+        p_request_id: idempotencyKey ?? null,
+      });
+      if (error) throw investmentError(error);
+      const res = data as { released_minor: number; currency: CurrencyCode; replayed?: boolean };
+      return {
+        releasedAmount: res.released_minor,
+        currency: res.currency,
+        replayed: res.replayed ?? false,
+      };
+    },
+    async listRewardTasks(): Promise<RewardTask[]> {
+      if (!(await hasSession())) return domain.listRewardTasks();
+      const { data, error } = await client.rpc("list_reward_tasks");
+      if (error) throw investmentError(error);
+      return ((data ?? []) as RawRewardTask[]).map(mapRewardTask);
+    },
+    async listMyTaskClaims(): Promise<TaskClaimRecord[]> {
+      if (!(await hasSession())) return domain.listMyTaskClaims();
+      const { data, error } = await client.rpc("list_my_task_claims");
+      if (error) throw investmentError(error);
+      return ((data ?? []) as RawTaskClaim[]).map(mapTaskClaim);
+    },
+    async claimRewardTask(input): Promise<TaskClaimResult> {
+      if (!(await hasSession())) return domain.claimRewardTask(input);
+      const { data, error } = await client.rpc("claim_task", {
+        p_task_id: input.taskId,
+        p_idempotency_key: input.idempotencyKey,
+        p_evidence: input.evidence ?? {},
+      });
+      if (error) throw investmentError(error);
+      const res = data as {
+        claim_id: string;
+        status: TaskClaimResult["status"];
+        deadline: string | null;
+        pending_links?: string[];
+        replayed?: boolean;
+      };
+      return {
+        claimId: res.claim_id,
+        status: res.status,
+        deadline: res.deadline,
+        pendingLinks: res.pending_links ?? [],
+        replayed: res.replayed ?? false,
+      };
+    },
+    async createIdentityLink(provider: IdentityProvider): Promise<IdentityLink> {
+      if (!(await hasSession())) return domain.createIdentityLink(provider);
+      const { data, error } = await client.rpc("create_identity_link_token", {
+        p_provider: provider,
+      });
+      if (error) throw investmentError(error);
+      const res = data as {
+        token: string;
+        expires_at: string;
+        provider: IdentityProvider;
+        bot_username: string | null;
+      };
+      return {
+        token: res.token,
+        expiresAt: res.expires_at,
+        provider: res.provider,
+        botUsername: res.bot_username,
+      };
+    },
     listNotifications: () => domain.listNotifications(),
     markNotificationRead: (id) => domain.markNotificationRead(id),
     markAllNotificationsRead: () => domain.markAllNotificationsRead(),

@@ -11,8 +11,11 @@ import type {
   KycDecisionInput,
   KycFilter,
   PageRequest,
+  ReferralStatus,
   RewardGrantStatus,
   RoundFilter,
+  TaskClaimStatus,
+  TaskStatus,
   UserFilter,
   WithdrawalDecisionInput,
 } from "@rentbrown/types";
@@ -52,7 +55,8 @@ export function useSetUserStatus() {
   const ds = useDataSource();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: AdminActionInput & { userId: string; status: AccountStatus }) => ds.setUserStatus(input),
+    mutationFn: (input: AdminActionInput & { userId: string; status: AccountStatus }) =>
+      ds.setUserStatus(input),
     onSuccess: () => qc.invalidateQueries(),
   });
 }
@@ -81,7 +85,10 @@ export function useDecideKyc() {
 export function useProperties(filter?: PageRequest) {
   const ds = useDataSource();
   const key = useKey();
-  return useQuery({ queryKey: key("properties", filter), queryFn: () => ds.listProperties(filter) });
+  return useQuery({
+    queryKey: key("properties", filter),
+    queryFn: () => ds.listProperties(filter),
+  });
 }
 
 export function useProperty(id: string) {
@@ -117,7 +124,10 @@ export function useRound(id: string) {
 export function useAdminInvestments(filter?: InvestmentAdminFilter) {
   const ds = useDataSource();
   const key = useKey();
-  return useQuery({ queryKey: key("investments", filter), queryFn: () => ds.listInvestments(filter) });
+  return useQuery({
+    queryKey: key("investments", filter),
+    queryFn: () => ds.listInvestments(filter),
+  });
 }
 
 export function useAdminInvestment(id: string) {
@@ -130,7 +140,8 @@ export function useMarkInvestmentReview() {
   const ds = useDataSource();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: AdminActionInput & { investmentId: string }) => ds.markInvestmentReview(input),
+    mutationFn: (input: AdminActionInput & { investmentId: string }) =>
+      ds.markInvestmentReview(input),
     onSuccess: () => qc.invalidateQueries(),
   });
 }
@@ -139,7 +150,8 @@ export function useResolveInvestmentReview() {
   const ds = useDataSource();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: AdminActionInput & { investmentId: string; to: InvestmentStatus }) => ds.resolveInvestmentReview(input),
+    mutationFn: (input: AdminActionInput & { investmentId: string; to: InvestmentStatus }) =>
+      ds.resolveInvestmentReview(input),
     onSuccess: () => qc.invalidateQueries(),
   });
 }
@@ -156,7 +168,11 @@ export function useRetrySettlement() {
 export function useInvestmentReconciliation(enabled: boolean) {
   const ds = useDataSource();
   const key = useKey();
-  return useQuery({ queryKey: key("investment-reconciliation"), queryFn: () => ds.reconcileInvestments(), enabled });
+  return useQuery({
+    queryKey: key("investment-reconciliation"),
+    queryFn: () => ds.reconcileInvestments(),
+    enabled,
+  });
 }
 
 export function useLedgerOverview() {
@@ -174,7 +190,10 @@ export function useDeposits(filter?: FinanceFilter) {
 export function useWithdrawals(filter?: FinanceFilter) {
   const ds = useDataSource();
   const key = useKey();
-  return useQuery({ queryKey: key("withdrawals", filter), queryFn: () => ds.listWithdrawals(filter) });
+  return useQuery({
+    queryKey: key("withdrawals", filter),
+    queryFn: () => ds.listWithdrawals(filter),
+  });
 }
 
 export function useWithdrawal(id: string) {
@@ -195,25 +214,39 @@ export function useDecideWithdrawal() {
 export function useWithdrawalReconciliation(enabled = true) {
   const ds = useDataSource();
   const key = useKey();
-  return useQuery({ queryKey: key("withdrawal-reconciliation"), queryFn: () => ds.reconcileWithdrawals(), enabled });
+  return useQuery({
+    queryKey: key("withdrawal-reconciliation"),
+    queryFn: () => ds.reconcileWithdrawals(),
+    enabled,
+  });
 }
 
 export function useKycReconciliation(enabled = true) {
   const ds = useDataSource();
   const key = useKey();
-  return useQuery({ queryKey: key("kyc-reconciliation"), queryFn: () => ds.reconcileKyc(), enabled });
+  return useQuery({
+    queryKey: key("kyc-reconciliation"),
+    queryFn: () => ds.reconcileKyc(),
+    enabled,
+  });
 }
 
 export function useTransactions(filter?: FinanceFilter) {
   const ds = useDataSource();
   const key = useKey();
-  return useQuery({ queryKey: key("transactions", filter), queryFn: () => ds.listTransactions(filter) });
+  return useQuery({
+    queryKey: key("transactions", filter),
+    queryFn: () => ds.listTransactions(filter),
+  });
 }
 
 export function useReconciliation(filter?: FinanceFilter) {
   const ds = useDataSource();
   const key = useKey();
-  return useQuery({ queryKey: key("reconciliation", filter), queryFn: () => ds.listReconciliation(filter) });
+  return useQuery({
+    queryKey: key("reconciliation", filter),
+    queryFn: () => ds.listReconciliation(filter),
+  });
 }
 
 export function useReferralOverview() {
@@ -222,7 +255,7 @@ export function useReferralOverview() {
   return useQuery({ queryKey: key("referral-overview"), queryFn: () => ds.getReferralOverview() });
 }
 
-export function useReferrals(filter?: PageRequest) {
+export function useReferrals(filter?: PageRequest & { status?: ReferralStatus[] }) {
   const ds = useDataSource();
   const key = useKey();
   return useQuery({ queryKey: key("referrals", filter), queryFn: () => ds.listReferrals(filter) });
@@ -231,7 +264,125 @@ export function useReferrals(filter?: PageRequest) {
 export function useRewardGrants(filter?: PageRequest & { status?: RewardGrantStatus[] }) {
   const ds = useDataSource();
   const key = useKey();
-  return useQuery({ queryKey: key("reward-grants", filter), queryFn: () => ds.listRewardGrants(filter) });
+  return useQuery({
+    queryKey: key("reward-grants", filter),
+    queryFn: () => ds.listRewardGrants(filter),
+  });
+}
+
+// ── Phase 9B: receivables, reward ops, task rewards ──────────────────────────
+
+export function useRewardReceivables(filter?: PageRequest & { status?: ("OPEN" | "SETTLED")[] }) {
+  const ds = useDataSource();
+  const key = useKey();
+  return useQuery({
+    queryKey: key("reward-receivables", filter),
+    queryFn: () => ds.listRewardReceivables(filter),
+  });
+}
+
+export function useReevaluateReferral() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: AdminActionInput & { referralId: string }) => ds.reevaluateReferral(input),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useReverseRewardGrant() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: AdminActionInput & { grantId: string }) => ds.reverseRewardGrant(input),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useReleaseBlockedReward() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: AdminActionInput & { grantId: string }) => ds.releaseBlockedReward(input),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useRewardReconciliation(enabled = true) {
+  const ds = useDataSource();
+  const key = useKey();
+  return useQuery({
+    queryKey: key("reconcile-rewards"),
+    queryFn: () => ds.reconcileRewards(),
+    enabled,
+  });
+}
+
+export function useRewardTasks(filter?: PageRequest & { status?: TaskStatus[] }) {
+  const ds = useDataSource();
+  const key = useKey();
+  return useQuery({
+    queryKey: key("reward-tasks", filter),
+    queryFn: () => ds.listRewardTasks(filter),
+  });
+}
+
+export function useUpsertRewardTask() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      input: AdminActionInput & { taskId?: string | null; fields: Record<string, unknown> },
+    ) => ds.upsertRewardTask(input),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useSetTaskStatus() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: AdminActionInput & { taskId: string; to: TaskStatus }) =>
+      ds.setTaskStatus(input),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useUpsertTaskRequirement() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      input: AdminActionInput & {
+        taskId: string;
+        requirementId?: string | null;
+        fields: Record<string, unknown>;
+      },
+    ) => ds.upsertTaskRequirement(input),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useTaskClaims(
+  filter?: PageRequest & { taskId?: string; status?: TaskClaimStatus[] },
+) {
+  const ds = useDataSource();
+  const key = useKey();
+  return useQuery({
+    queryKey: key("task-claims", filter),
+    queryFn: () => ds.listTaskClaims(filter),
+  });
+}
+
+export function useReviewTaskClaim() {
+  const ds = useDataSource();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      input: AdminActionInput & { claimId: string; legId: string; decision: "APPROVE" | "REJECT" },
+    ) => ds.reviewTaskClaim(input),
+    onSuccess: () => qc.invalidateQueries(),
+  });
 }
 
 export function useNotificationOverview() {
@@ -255,7 +406,11 @@ export function useAuditEvents(filter?: AuditFilter) {
 export function useLegalDocuments() {
   const ds = useDataSource();
   const key = useKey();
-  return useQuery({ queryKey: key("legal"), queryFn: () => ds.listLegalDocuments(), staleTime: Infinity });
+  return useQuery({
+    queryKey: key("legal"),
+    queryFn: () => ds.listLegalDocuments(),
+    staleTime: Infinity,
+  });
 }
 
 export function useReports(period: "7d" | "30d" | "90d") {

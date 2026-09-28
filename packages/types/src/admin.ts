@@ -27,8 +27,12 @@ import type {
   ProofDocument,
   PropertyLocation,
   ReferralPolicy,
-  ReferralRewardKind,
   ReferralStatus,
+  TaskClaimLeg,
+  TaskClaimPolicy,
+  TaskClaimStatus,
+  TaskRequirementKind,
+  TaskStatus,
   TransactionStatus,
   TransactionType,
   WalletAccountType,
@@ -39,11 +43,7 @@ import type {
 
 /** Roles are bundles of permissions. Never branch on a role name in screens — branch on permissions. */
 export type AdminRole =
-  | "SUPPORT"
-  | "KYC_REVIEWER"
-  | "OPERATIONS_ADMIN"
-  | "FINANCE_ADMIN"
-  | "SUPER_ADMIN";
+  "SUPPORT" | "KYC_REVIEWER" | "OPERATIONS_ADMIN" | "FINANCE_ADMIN" | "SUPER_ADMIN";
 
 export type Permission =
   | "users.read"
@@ -118,7 +118,8 @@ export const ADMIN_ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     role: "SUPPORT",
     label: "Support",
-    description: "Read-only access across operations screens for customer support. Cannot take actions.",
+    description:
+      "Read-only access across operations screens for customer support. Cannot take actions.",
     permissions: [
       "users.read",
       "kyc.read",
@@ -135,7 +136,8 @@ export const ADMIN_ROLE_DEFINITIONS: RoleDefinition[] = [
   {
     role: "KYC_REVIEWER",
     label: "KYC reviewer",
-    description: "Reviews identity submissions and can approve, reject or request more information.",
+    description:
+      "Reviews identity submissions and can approve, reject or request more information.",
     permissions: ["users.read", "kyc.read", "kyc.review"],
   },
   {
@@ -284,7 +286,12 @@ export interface AdminUserDetail extends AdminUserRow {
   deposits: AdminDepositRow[];
   withdrawals: AdminWithdrawalRow[];
   referrals: AdminReferralRow[];
-  devices: Array<{ id: string; label: string; platform: "iOS" | "Android" | "Web"; lastActiveAt: ISODateString }>;
+  devices: Array<{
+    id: string;
+    label: string;
+    platform: "iOS" | "Android" | "Web";
+    lastActiveAt: ISODateString;
+  }>;
   notes: Array<{ id: string; author: string; body: string; createdAt: ISODateString }>;
   activity: AuditEvent[];
 }
@@ -559,7 +566,13 @@ export interface AdminWithdrawalRow {
     accountName?: string;
     bankAccountId?: string;
   } | null;
-  events?: Array<{ from: string | null; to: string; source: string; note: string | null; at: ISODateString }>;
+  events?: Array<{
+    from: string | null;
+    to: string;
+    source: string;
+    note: string | null;
+    at: ISODateString;
+  }>;
   /** Outbound webhook/outbox deliveries (Make.com → Telegram). */
   outbound?: Array<{
     eventType: string;
@@ -614,7 +627,8 @@ export interface FinanceFilter extends PageRequest {
 
 // ── Referrals & rewards ──────────────────────────────────────────────────────
 
-export type RewardGrantStatus = "PENDING" | "QUALIFIED" | "CREDITED" | "REVERSED" | "BLOCKED";
+export type RewardGrantStatus =
+  "PENDING" | "QUALIFIED" | "CREDITED" | "PARTIALLY_REVERSED" | "REVERSED" | "BLOCKED";
 
 export interface AdminReferralRow {
   id: string;
@@ -635,13 +649,81 @@ export interface RewardGrantRow {
   referralId: string;
   referrerName: string;
   referredName: string;
-  kind: ReferralRewardKind;
+  kind: RewardGrantKind;
   amount: MinorUnits;
   currency: CurrencyCode;
   status: RewardGrantStatus;
   createdAt: ISODateString;
   creditedAt: ISODateString | null;
   note: string;
+}
+
+/** Wire-level grant kinds: SIGNUP/DEPOSIT for referral rewards, TASK for task rewards. */
+export type RewardGrantKind = "SIGNUP" | "DEPOSIT" | "TASK";
+
+/** Clawback debt created when already-spent reward value is reversed. */
+export interface RewardReceivableRow {
+  id: string;
+  userId: string;
+  userDisplayName: string;
+  currency: CurrencyCode;
+  amount: MinorUnits;
+  outstanding: MinorUnits;
+  sourceGrantId: string;
+  status: "OPEN" | "SETTLED";
+  createdAt: ISODateString;
+  settledAt: ISODateString | null;
+}
+
+// ── Task rewards (ops) ───────────────────────────────────────────────────────
+
+export interface AdminTaskRequirement {
+  id: string;
+  kind: TaskRequirementKind;
+  config: Record<string, unknown>;
+  required: boolean;
+  position: number;
+}
+
+export interface AdminRewardTaskRow {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  rewardAmount: MinorUnits;
+  rewardCurrency: CurrencyCode;
+  claimPolicy: TaskClaimPolicy;
+  maxClaims: number;
+  eligibility: Record<string, unknown>;
+  startsAt: ISODateString | null;
+  endsAt: ISODateString | null;
+  version: number;
+  publishedAt: ISODateString | null;
+  createdAt: ISODateString;
+  requirements: AdminTaskRequirement[];
+  claims: { total: number; pending: number; rewarded: number; rejected: number };
+}
+
+export interface AdminTaskClaimLeg extends TaskClaimLeg {
+  id: string;
+  verifiedBy: string | null;
+}
+
+export interface AdminTaskClaimRow {
+  id: string;
+  taskId: string;
+  taskTitle: string;
+  userId: string;
+  userDisplayName: string;
+  status: TaskClaimStatus;
+  attemptNo: number;
+  evidence: Record<string, unknown>;
+  claimDeadline: ISODateString | null;
+  resolvedAt: ISODateString | null;
+  reviewedBy: string | null;
+  createdAt: ISODateString;
+  legs: AdminTaskClaimLeg[];
 }
 
 export interface ReferralOverview {
@@ -685,7 +767,12 @@ export interface DeliveryRow {
 
 export interface NotificationOverview {
   asOf: ISODateString;
-  byChannel: Array<{ channel: NotificationChannel; sent: number; delivered: number; failed: number }>;
+  byChannel: Array<{
+    channel: NotificationChannel;
+    sent: number;
+    delivered: number;
+    failed: number;
+  }>;
   templates: NotificationTemplate[];
   recentDeliveries: DeliveryRow[];
 }
@@ -708,7 +795,14 @@ export interface PolicySet {
   version: string;
   effectiveFrom: ISODateString;
   parameters: PolicyParameter[];
-  pendingProposals: Array<{ id: string; key: string; proposedValue: number; proposedBy: string; proposedAt: ISODateString; status: "PENDING_APPROVAL" }>;
+  pendingProposals: Array<{
+    id: string;
+    key: string;
+    proposedValue: number;
+    proposedBy: string;
+    proposedAt: ISODateString;
+    status: "PENDING_APPROVAL";
+  }>;
 }
 
 // ── Audit ────────────────────────────────────────────────────────────────────
@@ -763,7 +857,12 @@ export interface ReportBundle {
   asOf: ISODateString;
   period: { from: ISODateString; to: ISODateString; label: string };
   series: ReportSeries[];
-  tables: Array<{ id: string; title: string; columns: string[]; rows: Array<Array<string | number>> }>;
+  tables: Array<{
+    id: string;
+    title: string;
+    columns: string[];
+    rows: Array<Array<string | number>>;
+  }>;
 }
 
 // ── The seam ─────────────────────────────────────────────────────────────────
@@ -776,7 +875,9 @@ export interface AdminDataSource {
 
   listUsers(filter?: UserFilter): Promise<Page<AdminUserRow>>;
   getUser(id: string): Promise<AdminUserDetail | null>;
-  setUserStatus(input: AdminActionInput & { userId: string; status: AccountStatus }): Promise<AdminActionResult>;
+  setUserStatus(
+    input: AdminActionInput & { userId: string; status: AccountStatus },
+  ): Promise<AdminActionResult>;
 
   /** Short-lived signed URL for a private KYC document (owner/reviewer authorized server-side). */
   getKycDocumentUrl(submissionId: string, kind: "selfie" | "poa"): Promise<string>;
@@ -798,9 +899,13 @@ export interface AdminDataSource {
   listInvestments(filter?: InvestmentAdminFilter): Promise<Page<AdminInvestmentRow>>;
   getInvestment(id: string): Promise<AdminInvestmentRow | null>;
   /** Audited ACTIVE → REVIEW_REQUIRED (finance roles only). */
-  markInvestmentReview(input: AdminActionInput & { investmentId: string }): Promise<AdminActionResult>;
+  markInvestmentReview(
+    input: AdminActionInput & { investmentId: string },
+  ): Promise<AdminActionResult>;
   /** Audited REVIEW_REQUIRED → resolved status; the server transition map governs. */
-  resolveInvestmentReview(input: AdminActionInput & { investmentId: string; to: InvestmentStatus }): Promise<AdminActionResult>;
+  resolveInvestmentReview(
+    input: AdminActionInput & { investmentId: string; to: InvestmentStatus },
+  ): Promise<AdminActionResult>;
   /** Audited settlement retry for MATURITY_DUE / stale SETTLING rows (finance roles). Same settle path as the worker. */
   retrySettlement(input: AdminActionInput & { investmentId: string }): Promise<AdminActionResult>;
   /** Detection-only integrity check: journals, capacity counters, idempotency. */
@@ -815,8 +920,51 @@ export interface AdminDataSource {
   listReconciliation(filter?: FinanceFilter): Promise<Page<ReconciliationItem>>;
 
   getReferralOverview(): Promise<ReferralOverview>;
-  listReferrals(filter?: PageRequest): Promise<Page<AdminReferralRow>>;
-  listRewardGrants(filter?: PageRequest & { status?: RewardGrantStatus[] }): Promise<Page<RewardGrantRow>>;
+  listReferrals(
+    filter?: PageRequest & { status?: ReferralStatus[] },
+  ): Promise<Page<AdminReferralRow>>;
+  listRewardGrants(
+    filter?: PageRequest & { status?: RewardGrantStatus[] },
+  ): Promise<Page<RewardGrantRow>>;
+  /** Open clawback debts created by reversing already-spent reward value. */
+  listRewardReceivables(
+    filter?: PageRequest & { status?: ("OPEN" | "SETTLED")[] },
+  ): Promise<Page<RewardReceivableRow>>;
+  /** Re-run referral qualification (ops replay — idempotent server-side). */
+  reevaluateReferral(input: AdminActionInput & { referralId: string }): Promise<AdminActionResult>;
+  /** Reverse a credited grant; spent value becomes a receivable. Finance only. */
+  reverseRewardGrant(input: AdminActionInput & { grantId: string }): Promise<AdminActionResult>;
+  /** Re-issue a BLOCKED grant after an ops decision. Finance only. */
+  releaseBlockedReward(input: AdminActionInput & { grantId: string }): Promise<AdminActionResult>;
+  /** Detection-only reward integrity checks (grant↔ledger↔wallet drift). */
+  reconcileRewards(): Promise<InvestmentReconciliationItem[]>;
+
+  // task rewards (Phase 9B)
+  listRewardTasks(
+    filter?: PageRequest & { status?: TaskStatus[] },
+  ): Promise<Page<AdminRewardTaskRow>>;
+  /** Create (lands DRAFT) or update a task; economics freeze on publish. */
+  upsertRewardTask(
+    input: AdminActionInput & { taskId?: string | null; fields: Record<string, unknown> },
+  ): Promise<AdminActionResult & { taskId?: string }>;
+  /** DRAFT→PUBLISHED/ARCHIVED, PUBLISHED→PAUSED/ARCHIVED, PAUSED→PUBLISHED/ARCHIVED. */
+  setTaskStatus(
+    input: AdminActionInput & { taskId: string; to: TaskStatus },
+  ): Promise<AdminActionResult>;
+  upsertTaskRequirement(
+    input: AdminActionInput & {
+      taskId: string;
+      requirementId?: string | null;
+      fields: Record<string, unknown>;
+    },
+  ): Promise<AdminActionResult>;
+  listTaskClaims(
+    filter?: PageRequest & { taskId?: string; status?: TaskClaimStatus[] },
+  ): Promise<Page<AdminTaskClaimRow>>;
+  /** Manual-leg decision (WhatsApp evidence etc.) — reviewers + ops/finance. */
+  reviewTaskClaim(
+    input: AdminActionInput & { claimId: string; legId: string; decision: "APPROVE" | "REJECT" },
+  ): Promise<AdminActionResult>;
 
   getNotificationOverview(): Promise<NotificationOverview>;
 

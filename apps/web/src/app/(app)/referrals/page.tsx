@@ -11,6 +11,7 @@ import { Section } from "../../../components/layout/section";
 import { ReferralCodeCard } from "../../../components/referrals/referral-code-card";
 import { ReferralPolicyCard } from "../../../components/referrals/referral-policy-card";
 import { ReferralRow } from "../../../components/referrals/referral-row";
+import { TaskRewardsCard } from "../../../components/referrals/task-rewards-card";
 
 export default function ReferralsPage() {
   const session = useRequireSession();
@@ -56,7 +57,11 @@ export default function ReferralsPage() {
       <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
         <StatCard
           label="People referred"
-          value={<span className="tabular text-[1.375rem] font-extrabold text-foreground">{s.referredCount}</span>}
+          value={
+            <span className="tabular text-[1.375rem] font-extrabold text-foreground">
+              {s.referredCount}
+            </span>
+          }
         />
         <StatCard
           label="Rewards credited"
@@ -76,21 +81,29 @@ export default function ReferralsPage() {
           <ReferralPolicyCard policy={s.policy} />
         </div>
 
-        <Section title="Recent referrals" actionHref="/referrals/history" actionLabel="View full history">
-          {recent.length === 0 ? (
-            <EmptyState
-              icon={<Gift />}
-              title="No referrals yet"
-              copy="Share your code — qualified rewards appear here."
-            />
-          ) : (
-            <div className="financial-card divide-y divide-border overflow-hidden">
-              {recent.map((r) => (
-                <ReferralRow key={r.id} referral={r} />
-              ))}
-            </div>
-          )}
-        </Section>
+        <div className="flex flex-col gap-6">
+          <Section
+            title="Recent referrals"
+            actionHref="/referrals/history"
+            actionLabel="View full history"
+          >
+            {recent.length === 0 ? (
+              <EmptyState
+                icon={<Gift />}
+                title="No referrals yet"
+                copy="Share your code — qualified rewards appear here."
+              />
+            ) : (
+              <div className="financial-card divide-y divide-border overflow-hidden">
+                {recent.map((r) => (
+                  <ReferralRow key={r.id} referral={r} />
+                ))}
+              </div>
+            )}
+          </Section>
+
+          <TaskRewardsCard />
+        </div>
       </div>
     </div>
   );

@@ -111,12 +111,7 @@ export interface InvestmentPlan {
 }
 
 export type InvestmentRoundStatus =
-  | "SCHEDULED"
-  | "OPEN"
-  | "NEARING_CAPACITY"
-  | "SOLD_OUT"
-  | "CLOSED"
-  | "SETTLED";
+  "SCHEDULED" | "OPEN" | "NEARING_CAPACITY" | "SOLD_OUT" | "CLOSED" | "SETTLED";
 
 export interface InvestmentRound {
   id: string;
@@ -382,13 +377,7 @@ export interface DepositOptions {
 // ── Withdrawals ──────────────────────────────────────────────────────────────
 
 export type WithdrawalStatus =
-  | "REQUESTED"
-  | "UNDER_REVIEW"
-  | "APPROVED"
-  | "PROCESSING"
-  | "COMPLETED"
-  | "REJECTED"
-  | "FAILED";
+  "REQUESTED" | "UNDER_REVIEW" | "APPROVED" | "PROCESSING" | "COMPLETED" | "REJECTED" | "FAILED";
 
 export interface WithdrawalQuote {
   amount: MinorUnits;
@@ -428,7 +417,9 @@ export interface Withdrawal {
 
 // ── Referrals & rewards ──────────────────────────────────────────────────────
 
-export type ReferralStatus = "JOINED" | "PENDING" | "QUALIFIED" | "CREDITED" | "DISQUALIFIED";
+/** BLOCKED = ops-frozen referral (reward review). Server vocabulary + legacy PENDING. */
+export type ReferralStatus =
+  "JOINED" | "PENDING" | "QUALIFIED" | "CREDITED" | "DISQUALIFIED" | "BLOCKED";
 
 /**
  * Two distinct reward kinds. Never conflate them:
@@ -486,6 +477,152 @@ export interface ReferralRecord {
   statusNote: string;
   qualifiedAt: ISODateString | null;
   creditedAt: ISODateString | null;
+}
+
+// ── Reward grants & provenance (Phase 9B) ────────────────────────────────────
+
+/** Server vocabulary — every reward is one of these three origins. */
+export type RewardKind = "REFERRAL_SIGNUP" | "REFERRAL_DEPOSIT" | "TASK";
+
+/**
+ * Grant lifecycle. PENDING/QUALIFIED have face value only; CREDITED value moves
+ * through bonus → released → reserved/consumed buckets; PARTIALLY_REVERSED /
+ * REVERSED result from clawbacks; BLOCKED awaits an ops decision.
+ */
+export type RewardGrantState =
+  "PENDING" | "QUALIFIED" | "CREDITED" | "PARTIALLY_REVERSED" | "REVERSED" | "BLOCKED";
+
+/** Append-only provenance movement on a grant (reward_allocations rows). */
+export type RewardMovementKind =
+  "ISSUE" | "RELEASE" | "HOLD" | "HOLD_RETURN" | "CONSUME" | "REVERSE" | "RECOVER";
+
+export interface RewardMovement {
+  movement: RewardMovementKind;
+  /** Bucket the value sat in before the move (BONUS / RELEASED / null). */
+  bucket: "BONUS" | "RELEASED" | null;
+  amount: MinorUnits;
+  at: ISODateString;
+}
+
+/** One reward grant with its per-bucket counters — all server-computed. */
+export interface RewardRecord {
+  id: string;
+  kind: RewardKind;
+  status: RewardGrantState;
+  currency: CurrencyCode;
+  /** Configured value at mint time (immutable). */
+  faceAmount: MinorUnits;
+  /** Value actually credited to the wallet. */
+  issuedAmount: MinorUnits;
+  /** Current provenance counters — bonus + released + reserved + consumed + reversed. */
+  bonusAmount: MinorUnits;
+  releasedAmount: MinorUnits;
+  reservedAmount: MinorUnits;
+  consumedAmount: MinorUnits;
+  reversedAmount: MinorUnits;
+  referralId: string | null;
+  depositId: string | null;
+  taskClaimId: string | null;
+  createdAt: ISODateString;
+  movements: RewardMovement[];
+}
+
+/** Result of moving BONUS reward value into AVAILABLE. */
+export interface BonusReleaseResult {
+  releasedAmount: MinorUnits;
+  currency: CurrencyCode;
+  /** True when the request id matched a completed release (safe retry). */
+  replayed: boolean;
+}
+
+// ── Task rewards (Phase 9B) ──────────────────────────────────────────────────
+
+export type TaskStatus = "DRAFT" | "PUBLISHED" | "PAUSED" | "ARCHIVED";
+export type TaskClaimPolicy = "ONE_TIME" | "REPEATABLE";
+export type TaskRequirementKind =
+  | "TELEGRAM_MEMBERSHIP"
+  | "WHATSAPP_MEMBERSHIP"
+  | "APP_ACTION"
+  | "MANUAL_EVIDENCE"
+  | "EXTERNAL_WEBHOOK";
+export type TaskClaimStatus =
+  "PENDING" | "VERIFYING" | "MANUAL_REVIEW" | "REWARDED" | "REJECTED" | "EXPIRED";
+export type TaskLegStatus =
+  "PENDING" | "VERIFYING" | "MANUAL_REVIEW" | "VERIFIED" | "FAILED" | "EXPIRED";
+export type IdentityProvider = "TELEGRAM";
+
+export interface TaskRequirementView {
+  id: string;
+  kind: TaskRequirementKind;
+  /** Public requirement config (e.g. invite link, group name). No secrets. */
+  config: Record<string, unknown>;
+  required: boolean;
+}
+
+/** A published reward task as the investor sees it. */
+export interface RewardTask {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  rewardAmount: MinorUnits;
+  rewardCurrency: CurrencyCode;
+  claimPolicy: TaskClaimPolicy;
+  eligibility: Record<string, unknown>;
+  requirements: TaskRequirementView[];
+  /** The caller's latest claim, when one exists. */
+  myClaim: { id: string; status: TaskClaimStatus; createdAt: ISODateString } | null;
+}
+
+export interface TaskClaimLeg {
+  requirementId: string;
+  kind: TaskRequirementKind;
+  status: TaskLegStatus;
+  verifiedAt: ISODateString | null;
+  detail: Record<string, unknown>;
+}
+
+export interface TaskClaimRecord {
+  id: string;
+  taskId: string;
+  taskTitle: string;
+  taskSlug: string;
+  status: TaskClaimStatus;
+  rewardAmount: MinorUnits;
+  rewardCurrency: CurrencyCode;
+  claimDeadline: ISODateString | null;
+  resolvedAt: ISODateString | null;
+  createdAt: ISODateString;
+  legs: TaskClaimLeg[];
+}
+
+/** Return value of `claimRewardTask`. */
+export interface TaskClaimResult {
+  claimId: string;
+  status: TaskClaimStatus;
+  deadline: ISODateString | null;
+  /** Providers still needing an identity link (e.g. ["TELEGRAM"]). */
+  pendingLinks: string[];
+  /** True when the same idempotency key was replayed. */
+  replayed: boolean;
+}
+
+export interface ClaimRewardTaskInput {
+  taskId: string;
+  /** Client-generated idempotency key — retries converge to the same claim. */
+  idempotencyKey: string;
+  /** Optional evidence payload, e.g. { phoneNumber: "+234…" } for manual legs. */
+  evidence?: { phoneNumber?: string } & Record<string, unknown>;
+}
+
+/** Short-lived token for binding an external identity (Telegram link flow). */
+export interface IdentityLink {
+  token: string;
+  expiresAt: ISODateString;
+  provider: IdentityProvider;
+  /** Telegram bot handle the user opens to complete linking (config-driven). */
+  botUsername: string | null;
 }
 
 // ── KYC (UI-only foundation; no provider) ────────────────────────────────────
@@ -557,12 +694,7 @@ export interface BankAccountInput {
 // ── Notifications ────────────────────────────────────────────────────────────
 
 export type NotificationCategory =
-  | "INVESTMENTS"
-  | "MONEY"
-  | "KYC"
-  | "REFERRALS"
-  | "SECURITY"
-  | "ANNOUNCEMENTS";
+  "INVESTMENTS" | "MONEY" | "KYC" | "REFERRALS" | "SECURITY" | "ANNOUNCEMENTS";
 
 export type NotificationLink =
   | { kind: "investment"; id: string }
@@ -691,11 +823,7 @@ export interface AuthGateway {
 }
 
 export type AuthChangeEvent =
-  | "SIGNED_IN"
-  | "SIGNED_OUT"
-  | "TOKEN_REFRESHED"
-  | "USER_UPDATED"
-  | "PASSWORD_RECOVERY";
+  "SIGNED_IN" | "SIGNED_OUT" | "TOKEN_REFRESHED" | "USER_UPDATED" | "PASSWORD_RECOVERY";
 
 // ── Dashboard projection ─────────────────────────────────────────────────────
 
@@ -904,6 +1032,28 @@ export interface InvestorDataSource {
   // referrals
   getReferralSummary(): Promise<ReferralSummary>;
   listReferrals(): Promise<ReferralRecord[]>;
+
+  // rewards & task rewards (Phase 9B)
+  /** All reward grants owned by the caller, with provenance movements. */
+  listRewards(): Promise<RewardRecord[]>;
+  /**
+   * Move reward value from BONUS to AVAILABLE so it can be invested or
+   * withdrawn. Omit `amount` to release the full bonus balance.
+   * `idempotencyKey` dedupes retries; a replay returns `replayed: true`.
+   */
+  transferBonusToAvailable(
+    amount?: MinorUnits,
+    currency?: CurrencyCode,
+    idempotencyKey?: string,
+  ): Promise<BonusReleaseResult>;
+  /** Published reward tasks visible to the caller (with their claim state). */
+  listRewardTasks(): Promise<RewardTask[]>;
+  /** The caller's task claims with per-leg verification status. */
+  listMyTaskClaims(): Promise<TaskClaimRecord[]>;
+  /** Start a claim on a published task; legs verify asynchronously/manually. */
+  claimRewardTask(input: ClaimRewardTaskInput): Promise<TaskClaimResult>;
+  /** Mint a short-lived token to bind an external identity (e.g. Telegram). */
+  createIdentityLink(provider: IdentityProvider): Promise<IdentityLink>;
 
   // notifications
   listNotifications(): Promise<Notification[]>;

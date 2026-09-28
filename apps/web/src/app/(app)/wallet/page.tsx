@@ -21,7 +21,7 @@ import { Landmark, Plus, ReceiptText } from "lucide-react";
 import { formatBps, formatMoney } from "@rentbrown/utils";
 import { MOCK_NOW } from "@rentbrown/mock-data";
 
-import { useTransactions, useWallet } from "../../../lib/data/hooks";
+import { useTransactions, useTransferBonus, useWallet } from "../../../lib/data/hooks";
 import { useRequireSession } from "../../../lib/session";
 import { PageHeader } from "../../../components/layout/page-header";
 import { PageSkeleton } from "../../../components/layout/page-skeleton";
@@ -33,6 +33,7 @@ export default function WalletPage() {
   const session = useRequireSession();
   const wallet = useWallet();
   const transactions = useTransactions();
+  const transferBonus = useTransferBonus();
   const [selected, setSelected] = React.useState<string | null>(null);
   const [bonusOpen, setBonusOpen] = React.useState(false);
 
@@ -77,7 +78,11 @@ export default function WalletPage() {
       <WalletBalanceCard wallet={w} />
 
       <div className="grid gap-6 lg:grid-cols-[1.4fr_.6fr]">
-        <Section title="Recent transactions" actionHref="/wallet/transactions" actionLabel="View all">
+        <Section
+          title="Recent transactions"
+          actionHref="/wallet/transactions"
+          actionLabel="View all"
+        >
           {transactions.isPending ? (
             <div className="financial-card p-6 text-sm text-muted-foreground">Loading…</div>
           ) : recent.length === 0 ? (
@@ -140,7 +145,12 @@ export default function WalletPage() {
 
           <div className="financial-card p-5">
             <h2 className="text-base font-bold text-foreground">Bonus balance</h2>
-            <MoneyFigure amount={w.balances.BONUS} currency={w.currency} size="md" className="mt-2" />
+            <MoneyFigure
+              amount={w.balances.BONUS}
+              currency={w.currency}
+              size="md"
+              className="mt-2"
+            />
             <p className="mt-1 text-xs text-muted-foreground">
               Qualified referral rewards — invest them or transfer to available.
             </p>
@@ -162,26 +172,45 @@ export default function WalletPage() {
                 label="Withdrawal fee"
                 value={`${formatBps(policies.withdrawalFeeBps)} capped at ${formatMoney(policies.withdrawalFeeCap, w.currency)}`}
               />
-              <DataRow label="Minimum withdrawal" value={formatMoney(policies.minWithdrawal, w.currency)} />
-              <DataRow label="Minimum deposit" value={formatMoney(policies.minDeposit, w.currency)} />
+              <DataRow
+                label="Minimum withdrawal"
+                value={formatMoney(policies.minWithdrawal, w.currency)}
+              />
+              <DataRow
+                label="Minimum deposit"
+                value={formatMoney(policies.minDeposit, w.currency)}
+              />
               <DataRow label="Deposit fee" value="None" />
               <DataRow
                 label="Withdrawal verification"
-                value={policies.kycRequiredForWithdrawal ? "Identity verification required" : "Not required"}
+                value={
+                  policies.kycRequiredForWithdrawal
+                    ? "Identity verification required"
+                    : "Not required"
+                }
               />
             </div>
           </div>
         </div>
       </div>
 
-      <TransactionDetailSheet transactionId={selected} open={selected !== null} onOpenChange={(o) => !o && setSelected(null)} />
+      <TransactionDetailSheet
+        transactionId={selected}
+        open={selected !== null}
+        onOpenChange={(o) => !o && setSelected(null)}
+      />
 
       <Dialog open={bonusOpen} onOpenChange={setBonusOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Transfer bonus to available?</DialogTitle>
             <DialogDescription>
-              <MoneyFigure amount={w.balances.BONUS} currency={w.currency} size="md" className="mt-1" />
+              <MoneyFigure
+                amount={w.balances.BONUS}
+                currency={w.currency}
+                size="md"
+                className="mt-1"
+              />
               <span className="mt-1 block">will move to your available balance.</span>
             </DialogDescription>
           </DialogHeader>
@@ -190,12 +219,26 @@ export default function WalletPage() {
               Cancel
             </Button>
             <Button
+              disabled={transferBonus.isPending}
               onClick={() => {
-                setBonusOpen(false);
-                toast.success("Bonus transfers arrive with the backend phase");
+                transferBonus.mutate(
+                  { idempotencyKey: crypto.randomUUID() },
+                  {
+                    onSuccess: (r) => {
+                      setBonusOpen(false);
+                      toast.success(
+                        `${formatMoney(r.releasedAmount, r.currency)} moved to your available balance${r.replayed ? " (already applied)" : ""}`,
+                      );
+                    },
+                    onError: (e) =>
+                      toast.error(
+                        e instanceof Error ? e.message : "The transfer could not be completed.",
+                      ),
+                  },
+                );
               }}
             >
-              Transfer
+              {transferBonus.isPending ? "Transferring…" : "Transfer"}
             </Button>
           </DialogFooter>
         </DialogContent>

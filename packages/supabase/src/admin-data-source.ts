@@ -13,6 +13,7 @@ import type {
   AdminKycCase,
   AdminKycEvent,
   AdminWithdrawalRow,
+  CurrencyCode,
   FinanceFilter,
   InvestmentAdminFilter,
   InvestmentReconciliationItem,
@@ -23,6 +24,14 @@ import type {
   KycStatus,
   Page,
   PaymentStatus,
+  ReferralStatus,
+  RewardGrantRow,
+  RewardGrantStatus,
+  TaskClaimPolicy,
+  TaskClaimStatus,
+  TaskLegStatus,
+  TaskRequirementKind,
+  TaskStatus,
   WithdrawalStatus,
 } from "@rentbrown/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -54,16 +63,31 @@ const EVENT_LABEL: Record<string, string> = {
 };
 
 interface RawAdminInvestmentRow {
-  id: string; reference: string; user_id: string; user_display_name: string | null;
-  round_id: string; plan_id: string; property_id: string;
-  property_name: string; property_slug: string; plan_name: string;
-  round_number: number; round_status: string; seed_tag: string | null;
+  id: string;
+  reference: string;
+  user_id: string;
+  user_display_name: string | null;
+  round_id: string;
+  plan_id: string;
+  property_id: string;
+  property_name: string;
+  property_slug: string;
+  plan_name: string;
+  round_number: number;
+  round_status: string;
+  seed_tag: string | null;
   funding_source: "WALLET" | "BANK_TRANSFER" | "CARD";
-  status: InvestmentStatus; currency: "NGN" | "USD";
-  slots: number; principal_minor: number; roi_bps: number;
-  expected_profit_minor: number; maturity_value_minor: number;
-  activated_at: string | null; matures_at: string | null;
-  payment_reference: string | null; created_at: string;
+  status: InvestmentStatus;
+  currency: "NGN" | "USD";
+  slots: number;
+  principal_minor: number;
+  roi_bps: number;
+  expected_profit_minor: number;
+  maturity_value_minor: number;
+  activated_at: string | null;
+  matures_at: string | null;
+  payment_reference: string | null;
+  created_at: string;
 }
 
 function mapRow(r: RawAdminInvestmentRow): AdminInvestmentRow {
@@ -96,13 +120,18 @@ function mapRow(r: RawAdminInvestmentRow): AdminInvestmentRow {
 }
 
 function mapEvent(e: {
-  id: string; event_type: string; actor_kind: string;
-  created_at: string; metadata: { note?: string } | null;
+  id: string;
+  event_type: string;
+  actor_kind: string;
+  created_at: string;
+  metadata: { note?: string } | null;
 }): AdminInvestmentEvent {
   return {
     id: e.id,
     type: e.event_type,
-    label: e.metadata?.note ? `${EVENT_LABEL[e.event_type] ?? e.event_type} — ${e.metadata.note}` : EVENT_LABEL[e.event_type] ?? e.event_type,
+    label: e.metadata?.note
+      ? `${EVENT_LABEL[e.event_type] ?? e.event_type} — ${e.metadata.note}`
+      : (EVENT_LABEL[e.event_type] ?? e.event_type),
     at: e.created_at,
     actor: (e.actor_kind as AdminInvestmentEvent["actor"]) ?? "SYSTEM",
     note: e.metadata?.note,
@@ -110,7 +139,12 @@ function mapEvent(e: {
 }
 
 const match = (haystack: unknown[], q?: string) =>
-  !q || haystack.map((h) => String(h ?? "")).join(" ").toLowerCase().includes(q.toLowerCase());
+  !q ||
+  haystack
+    .map((h) => String(h ?? ""))
+    .join(" ")
+    .toLowerCase()
+    .includes(q.toLowerCase());
 
 // ── Phase 8B: KYC review + withdrawal ops mappers ───────────────────────────
 
@@ -142,7 +176,8 @@ interface RawKycCaseRow {
 }
 
 function reviewCheck(status: string): KycCheck {
-  const s: KycCheck["status"] = status === "VERIFIED" ? "PASSED" : status === "REJECTED" ? "FAILED" : "MANUAL";
+  const s: KycCheck["status"] =
+    status === "VERIFIED" ? "PASSED" : status === "REJECTED" ? "FAILED" : "MANUAL";
   return {
     id: "manual-review",
     label: "Manual document review",
@@ -194,7 +229,13 @@ interface RawKycCaseDetail {
   reviewed_at: string | null;
   review_note: string | null;
   rejection_reason: string | null;
-  events: Array<{ from: string | null; to: string; source: string; note: string | null; at: string }> | null;
+  events: Array<{
+    from: string | null;
+    to: string;
+    source: string;
+    note: string | null;
+    at: string;
+  }> | null;
 }
 
 const KYC_DETAIL_STATUS: Record<string, KycStatus> = {
@@ -234,8 +275,16 @@ function mapKycCaseDetail(d: RawKycCaseDetail, reviewerName: string | null): Adm
     checks: [
       presence("Legal name provided", !!d.full_legal_name, d.full_legal_name ?? "Not provided yet"),
       presence("BVN provided", !!d.bvn, d.bvn ?? "Not provided yet"),
-      presence("Selfie uploaded", !!d.selfie_path, d.selfie_path ? "Stored privately — open via the document viewer" : "Not uploaded yet"),
-      presence("Proof of address uploaded", !!d.poa_path, d.poa_type ? d.poa_type.replace(/_/g, " ").toLowerCase() : "Not uploaded yet"),
+      presence(
+        "Selfie uploaded",
+        !!d.selfie_path,
+        d.selfie_path ? "Stored privately — open via the document viewer" : "Not uploaded yet",
+      ),
+      presence(
+        "Proof of address uploaded",
+        !!d.poa_path,
+        d.poa_type ? d.poa_type.replace(/_/g, " ").toLowerCase() : "Not uploaded yet",
+      ),
       reviewCheck(d.status),
     ],
     reviewer: reviewerName,
@@ -300,7 +349,13 @@ interface RawAdminWithdrawalDetail extends RawAdminWithdrawalRow {
     account_name?: string;
     bank_account_id?: string;
   } | null;
-  events: Array<{ from: string | null; to: string; source: string; note: string | null; at: string }> | null;
+  events: Array<{
+    from: string | null;
+    to: string;
+    source: string;
+    note: string | null;
+    at: string;
+  }> | null;
   outbound: Array<{
     event_type: string;
     status: string;
@@ -320,7 +375,10 @@ function applySortOn<T>(items: T[], sort: string | undefined, fallback: keyof T)
     if (av == null && bv == null) return 0;
     if (av == null) return 1;
     if (bv == null) return -1;
-    const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
+    const cmp =
+      typeof av === "number" && typeof bv === "number"
+        ? av - bv
+        : String(av).localeCompare(String(bv));
     return desc ? -cmp : cmp;
   });
 }
@@ -328,7 +386,12 @@ function applySortOn<T>(items: T[], sort: string | undefined, fallback: keyof T)
 function pageOf<T>(items: T[], filter?: { page?: number; pageSize?: number }): Page<T> {
   const page = Math.max(1, filter?.page ?? 1);
   const pageSize = Math.max(1, filter?.pageSize ?? 15);
-  return { items: items.slice((page - 1) * pageSize, page * pageSize), total: items.length, page, pageSize };
+  return {
+    items: items.slice((page - 1) * pageSize, page * pageSize),
+    total: items.length,
+    page,
+    pageSize,
+  };
 }
 
 function applySort(items: AdminInvestmentRow[], sort?: string): AdminInvestmentRow[] {
@@ -341,7 +404,10 @@ function applySort(items: AdminInvestmentRow[], sort?: string): AdminInvestmentR
     if (av == null && bv == null) return 0;
     if (av == null) return 1;
     if (bv == null) return -1;
-    const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
+    const cmp =
+      typeof av === "number" && typeof bv === "number"
+        ? av - bv
+        : String(av).localeCompare(String(bv));
     return desc ? -cmp : cmp;
   });
 }
@@ -375,12 +441,20 @@ export function createSupabaseAdminDataSource(
       });
       if (error) throw new Error(error.message);
       let items = ((data ?? []) as RawAdminInvestmentRow[]).map(mapRow);
-      if (filter?.status && filter.status.length > 1) items = items.filter((i) => filter.status!.includes(i.status));
-      items = items.filter((i) => match([i.reference, i.userDisplayName, i.propertyName], filter?.query));
+      if (filter?.status && filter.status.length > 1)
+        items = items.filter((i) => filter.status!.includes(i.status));
+      items = items.filter((i) =>
+        match([i.reference, i.userDisplayName, i.propertyName], filter?.query),
+      );
       items = applySort(items, filter?.sort ?? "-createdAt");
       const page = Math.max(1, filter?.page ?? 1);
       const pageSize = Math.max(1, filter?.pageSize ?? 15);
-      return { items: items.slice((page - 1) * pageSize, page * pageSize), total: items.length, page, pageSize };
+      return {
+        items: items.slice((page - 1) * pageSize, page * pageSize),
+        total: items.length,
+        page,
+        pageSize,
+      };
     },
 
     async getInvestment(id: string): Promise<AdminInvestmentRow | null> {
@@ -418,7 +492,11 @@ export function createSupabaseAdminDataSource(
         p_request_id: input.idempotencyKey,
       });
       if (error) return { ok: false, auditId: "", message: error.message };
-      return { ok: true, auditId: input.idempotencyKey, message: "Investment is now under review." };
+      return {
+        ok: true,
+        auditId: input.idempotencyKey,
+        message: "Investment is now under review.",
+      };
     },
 
     async resolveInvestmentReview(input) {
@@ -430,7 +508,11 @@ export function createSupabaseAdminDataSource(
         p_request_id: input.idempotencyKey,
       });
       if (error) return { ok: false, auditId: "", message: error.message };
-      return { ok: true, auditId: input.idempotencyKey, message: `Investment moved to ${input.to.toLowerCase()}.` };
+      return {
+        ok: true,
+        auditId: input.idempotencyKey,
+        message: `Investment moved to ${input.to.toLowerCase()}.`,
+      };
     },
 
     async retrySettlement(input) {
@@ -442,17 +524,31 @@ export function createSupabaseAdminDataSource(
       });
       if (error) return { ok: false, auditId: "", message: error.message };
       const status = (data as { status?: string } | null)?.status;
-      return { ok: status === "COMPLETED", auditId: input.idempotencyKey,
-        message: status === "COMPLETED" ? "Settlement completed." : `Retry finished — status ${status}.` };
+      return {
+        ok: status === "COMPLETED",
+        auditId: input.idempotencyKey,
+        message:
+          status === "COMPLETED" ? "Settlement completed." : `Retry finished — status ${status}.`,
+      };
     },
 
     async reconcileInvestments(): Promise<InvestmentReconciliationItem[]> {
       if (!(await hasSession())) return domain.reconcileInvestments();
       const { data, error } = await client.rpc("reconcile_investments");
       if (error) throw new Error(error.message);
-      return ((data ?? []) as Array<{ check_name: string; entity_type: string; entity_id: string; detail: string }>).map(
-        (r) => ({ checkName: r.check_name, entityType: r.entity_type, entityId: r.entity_id, detail: r.detail }),
-      );
+      return (
+        (data ?? []) as Array<{
+          check_name: string;
+          entity_type: string;
+          entity_id: string;
+          detail: string;
+        }>
+      ).map((r) => ({
+        checkName: r.check_name,
+        entityType: r.entity_type,
+        entityId: r.entity_id,
+        detail: r.detail,
+      }));
     },
 
     // ── Phase 8B: KYC review queue ──────────────────────────────────────────
@@ -466,7 +562,9 @@ export function createSupabaseAdminDataSource(
       });
       if (error) throw new Error(error.message);
       let items = ((data ?? []) as RawKycCaseRow[]).map(mapKycCaseRow);
-      items = items.filter((c) => match([c.userDisplayName, c.id, c.documentType, c.documentNumberMasked], filter?.query));
+      items = items.filter((c) =>
+        match([c.userDisplayName, c.id, c.documentType, c.documentNumberMasked], filter?.query),
+      );
       items = applySortOn(items, filter?.sort, "submittedAt");
       return pageOf(items, filter);
     },
@@ -481,7 +579,11 @@ export function createSupabaseAdminDataSource(
       const d = data as RawKycCaseDetail;
       let reviewerName: string | null = null;
       if (d.reviewed_by) {
-        const { data: prof } = await client.from("profiles").select("display_name").eq("id", d.reviewed_by).maybeSingle();
+        const { data: prof } = await client
+          .from("profiles")
+          .select("display_name")
+          .eq("id", d.reviewed_by)
+          .maybeSingle();
         reviewerName = (prof as { display_name?: string } | null)?.display_name ?? null;
       }
       return mapKycCaseDetail(d, reviewerName);
@@ -492,7 +594,10 @@ export function createSupabaseAdminDataSource(
       // The backend transition map is APPROVE/REJECT — "request more info" is a
       // rejection that invites resubmission, so the reason explains what is needed.
       const decision = input.decision === "REQUEST_MORE_INFO" ? "REJECT" : input.decision;
-      const reason = input.decision === "REQUEST_MORE_INFO" ? `Additional information required — ${input.reason}` : input.reason;
+      const reason =
+        input.decision === "REQUEST_MORE_INFO"
+          ? `Additional information required — ${input.reason}`
+          : input.reason;
       const { error } = await client.rpc("admin_decide_kyc", {
         p_submission_id: input.caseId,
         p_decision: decision,
@@ -503,7 +608,10 @@ export function createSupabaseAdminDataSource(
       return {
         ok: true,
         auditId: input.idempotencyKey,
-        message: input.decision === "APPROVE" ? "Submission verified." : "Submission rejected — the investor can resubmit.",
+        message:
+          input.decision === "APPROVE"
+            ? "Submission verified."
+            : "Submission rejected — the investor can resubmit.",
       };
     },
 
@@ -519,7 +627,9 @@ export function createSupabaseAdminDataSource(
             const body = (await ctx.json()) as { error?: string };
             if (body?.error) msg = body.error;
             else msg = await ctx.text();
-          } catch { /* fall through */ }
+          } catch {
+            /* fall through */
+          }
         }
         throw new Error(msg || "Couldn't open the document.");
       }
@@ -537,8 +647,11 @@ export function createSupabaseAdminDataSource(
       });
       if (error) throw new Error(error.message);
       let items = ((data ?? []) as RawAdminWithdrawalRow[]).map(mapWithdrawalRow);
-      if (filter?.status && filter.status.length > 1) items = items.filter((w) => filter.status!.includes(w.status));
-      items = items.filter((w) => match([w.reference, w.userDisplayName, w.destinationLabel], filter?.query));
+      if (filter?.status && filter.status.length > 1)
+        items = items.filter((w) => filter.status!.includes(w.status));
+      items = items.filter((w) =>
+        match([w.reference, w.userDisplayName, w.destinationLabel], filter?.query),
+      );
       items = applySortOn(items, filter?.sort, "requestedAt");
       return pageOf(items, filter);
     },
@@ -563,7 +676,13 @@ export function createSupabaseAdminDataSource(
         accountName: dest.account_name,
         bankAccountId: dest.bank_account_id,
       };
-      row.events = (d.events ?? []).map((e) => ({ from: e.from, to: e.to, source: e.source, note: e.note, at: e.at }));
+      row.events = (d.events ?? []).map((e) => ({
+        from: e.from,
+        to: e.to,
+        source: e.source,
+        note: e.note,
+        at: e.at,
+      }));
       row.outbound = (d.outbound ?? []).map((o) => ({
         eventType: o.event_type,
         status: o.status,
@@ -596,18 +715,459 @@ export function createSupabaseAdminDataSource(
       if (!(await hasSession())) return domain.reconcileWithdrawals();
       const { data, error } = await client.rpc("reconcile_withdrawals");
       if (error) throw new Error(error.message);
-      return ((data ?? []) as Array<{ check_name: string; entity_type: string; entity_id: string; detail: string }>).map(
-        (r) => ({ checkName: r.check_name, entityType: r.entity_type, entityId: r.entity_id, detail: r.detail }),
-      );
+      return (
+        (data ?? []) as Array<{
+          check_name: string;
+          entity_type: string;
+          entity_id: string;
+          detail: string;
+        }>
+      ).map((r) => ({
+        checkName: r.check_name,
+        entityType: r.entity_type,
+        entityId: r.entity_id,
+        detail: r.detail,
+      }));
     },
 
     async reconcileKyc(): Promise<InvestmentReconciliationItem[]> {
       if (!(await hasSession())) return domain.reconcileKyc();
       const { data, error } = await client.rpc("reconcile_kyc");
       if (error) throw new Error(error.message);
-      return ((data ?? []) as Array<{ check_name: string; entity_type: string; entity_id: string; detail: string }>).map(
-        (r) => ({ checkName: r.check_name, entityType: r.entity_type, entityId: r.entity_id, detail: r.detail }),
+      return (
+        (data ?? []) as Array<{
+          check_name: string;
+          entity_type: string;
+          entity_id: string;
+          detail: string;
+        }>
+      ).map((r) => ({
+        checkName: r.check_name,
+        entityType: r.entity_type,
+        entityId: r.entity_id,
+        detail: r.detail,
+      }));
+    },
+
+    // ── Phase 9B: referrals, rewards, task ops ───────────────────────────────
+
+    async getReferralOverview() {
+      if (!(await hasSession())) return domain.getReferralOverview();
+      const { data, error } = await client.rpc("admin_referral_overview");
+      if (error) throw new Error(error.message);
+      const raw = data as {
+        totals: { total?: number; qualified?: number; credited?: number };
+        rewards: Array<{
+          currency: string;
+          kind: string;
+          issued_minor: number;
+          pending_minor: number;
+          reversed_minor: number;
+        }> | null;
+        policy: {
+          signup_reward_minor_ngn?: number;
+          qualifying_deposit_minor_ngn?: number;
+          deposit_reward_bps?: number;
+          deposit_reward_cap_minor_ngn?: number;
+        };
+      };
+      const ngn = (raw.rewards ?? []).filter((r) => r.currency === "NGN");
+      const sum = (f: (r: (typeof ngn)[number]) => number) => ngn.reduce((s, r) => s + f(r), 0);
+      return {
+        asOf: new Date().toISOString(),
+        policy: {
+          version: "live",
+          currency: "NGN",
+          signupReward: raw.policy.signup_reward_minor_ngn ?? 0,
+          qualifyingDeposit: raw.policy.qualifying_deposit_minor_ngn ?? 0,
+          depositReferralBps: raw.policy.deposit_reward_bps ?? 0,
+          depositReferralCap: raw.policy.deposit_reward_cap_minor_ngn ?? 0,
+          qualificationRule: "",
+        },
+        totals: {
+          attributed: raw.totals.total ?? 0,
+          qualified: (raw.totals.qualified ?? 0) + (raw.totals.credited ?? 0),
+          pendingRewards: sum((r) => r.pending_minor),
+          creditedRewards: sum((r) => r.issued_minor),
+          reversedRewards: sum((r) => r.reversed_minor),
+          currency: "NGN",
+        },
+      };
+    },
+
+    async listReferrals(filter) {
+      if (!(await hasSession())) return domain.listReferrals(filter);
+      const { data, error } = await client.rpc("admin_list_referrals", {
+        p_status: filter?.status?.length === 1 ? filter.status[0] : null,
+        p_limit: 500,
+        p_offset: 0,
+      });
+      if (error) throw new Error(error.message);
+      let items = (
+        (data ?? []) as Array<{
+          id: string;
+          status: ReferralStatus;
+          referrer_id: string;
+          referrer_name: string | null;
+          referred_id: string;
+          referred_name: string | null;
+          code_snapshot: string | null;
+          qualified_at: string | null;
+          created_at: string;
+        }>
+      ).map((r) => ({
+        id: r.id,
+        referrerId: r.referrer_id,
+        referrerName: r.referrer_name ?? "—",
+        referredId: r.referred_id,
+        referredName: r.referred_name ?? "—",
+        codeSnapshot: r.code_snapshot ?? "—",
+        attributedAt: r.created_at,
+        status: r.status,
+        qualifiedAt: r.qualified_at,
+        flags: [] as string[],
+      }));
+      if (filter?.status && filter.status.length > 1)
+        items = items.filter((r) => filter.status!.includes(r.status));
+      items = items.filter((r) =>
+        match([r.referrerName, r.referredName, r.codeSnapshot], filter?.query),
       );
+      items = applySortOn(items, filter?.sort, "attributedAt");
+      return pageOf(items, filter);
+    },
+
+    async listRewardGrants(filter) {
+      if (!(await hasSession())) return domain.listRewardGrants(filter);
+      const { data, error } = await client.rpc("admin_list_reward_grants", {
+        p_status: filter?.status?.length === 1 ? filter.status[0] : null,
+        p_kind: null,
+        p_limit: 500,
+        p_offset: 0,
+      });
+      if (error) throw new Error(error.message);
+      const kindLabel = (k: string) =>
+        k === "REFERRAL_SIGNUP" ? "SIGNUP" : k === "REFERRAL_DEPOSIT" ? "DEPOSIT" : "TASK";
+      let items = (
+        (data ?? []) as Array<{
+          id: string;
+          kind: string;
+          status: RewardGrantStatus;
+          user_id: string;
+          user_display_name: string | null;
+          currency: CurrencyCode;
+          face_minor: number;
+          referral_id: string | null;
+          deposit_id: string | null;
+          task_claim_id: string | null;
+          created_at: string;
+        }>
+      ).map((g) => ({
+        id: g.id,
+        referralId: g.referral_id ?? g.task_claim_id ?? g.id,
+        referrerName: g.user_display_name ?? "—",
+        referredName: "—",
+        kind: kindLabel(g.kind) as RewardGrantRow["kind"],
+        amount: g.face_minor,
+        currency: g.currency,
+        status: g.status,
+        createdAt: g.created_at,
+        creditedAt: null,
+        note: g.task_claim_id
+          ? "Task reward"
+          : g.deposit_id
+            ? "Deposit referral reward"
+            : "Signup referral reward",
+      }));
+      if (filter?.status && filter.status.length > 1)
+        items = items.filter((g) => filter.status!.includes(g.status));
+      items = items.filter((g) => match([g.referrerName, g.kind], filter?.query));
+      items = applySortOn(items, filter?.sort, "createdAt");
+      return pageOf(items, filter);
+    },
+
+    async listRewardReceivables(filter) {
+      if (!(await hasSession())) return domain.listRewardReceivables(filter);
+      const { data, error } = await client.rpc("admin_list_receivables", {
+        p_status: filter?.status?.length === 1 ? filter.status[0] : null,
+        p_limit: 500,
+        p_offset: 0,
+      });
+      if (error) throw new Error(error.message);
+      let items = (
+        (data ?? []) as Array<{
+          id: string;
+          user_id: string;
+          user_display_name: string | null;
+          currency: CurrencyCode;
+          amount_minor: number;
+          outstanding_minor: number;
+          source_grant_id: string;
+          status: "OPEN" | "SETTLED";
+          created_at: string;
+          settled_at: string | null;
+        }>
+      ).map((r) => ({
+        id: r.id,
+        userId: r.user_id,
+        userDisplayName: r.user_display_name ?? "—",
+        currency: r.currency,
+        amount: r.amount_minor,
+        outstanding: r.outstanding_minor,
+        sourceGrantId: r.source_grant_id,
+        status: r.status,
+        createdAt: r.created_at,
+        settledAt: r.settled_at,
+      }));
+      if (filter?.status && filter.status.length > 1)
+        items = items.filter((r) => filter.status!.includes(r.status));
+      items = items.filter((r) => match([r.userDisplayName, r.sourceGrantId], filter?.query));
+      items = applySortOn(items, filter?.sort, "createdAt");
+      return pageOf(items, filter);
+    },
+
+    async reevaluateReferral(input) {
+      if (!(await hasSession())) return domain.reevaluateReferral(input);
+      const { error } = await client.rpc("admin_reevaluate_referral", {
+        p_referral_id: input.referralId,
+        p_request_id: input.idempotencyKey,
+      });
+      if (error) return { ok: false, auditId: "", message: error.message };
+      return { ok: true, auditId: input.idempotencyKey, message: "Referral re-evaluated." };
+    },
+
+    async reverseRewardGrant(input) {
+      if (!(await hasSession())) return domain.reverseRewardGrant(input);
+      const { error } = await client.rpc("admin_reverse_reward", {
+        p_grant_id: input.grantId,
+        p_reason: input.reason ?? "Reversed by ops",
+        p_request_id: input.idempotencyKey,
+      });
+      if (error) return { ok: false, auditId: "", message: error.message };
+      return {
+        ok: true,
+        auditId: input.idempotencyKey,
+        message: "Grant reversed — spent value became a receivable.",
+      };
+    },
+
+    async releaseBlockedReward(input) {
+      if (!(await hasSession())) return domain.releaseBlockedReward(input);
+      const { data, error } = await client.rpc("admin_release_blocked_reward", {
+        p_grant_id: input.grantId,
+        p_request_id: input.idempotencyKey,
+      });
+      if (error) return { ok: false, auditId: "", message: error.message };
+      return {
+        ok: true,
+        auditId: input.idempotencyKey,
+        message: `Grant released — status ${String(data)}.`,
+      };
+    },
+
+    async reconcileRewards(): Promise<InvestmentReconciliationItem[]> {
+      if (!(await hasSession())) return domain.reconcileRewards();
+      const { data, error } = await client.rpc("reconcile_rewards");
+      if (error) throw new Error(error.message);
+      return (
+        (data ?? []) as Array<{
+          check_name: string;
+          entity_type: string;
+          entity_id: string;
+          detail: string;
+        }>
+      ).map((r) => ({
+        checkName: r.check_name,
+        entityType: r.entity_type,
+        entityId: r.entity_id,
+        detail: r.detail,
+      }));
+    },
+
+    async listRewardTasks(filter) {
+      if (!(await hasSession())) return domain.listRewardTasks(filter);
+      const { data, error } = await client.rpc("admin_list_reward_tasks", {
+        p_status: filter?.status?.length === 1 ? filter.status[0] : null,
+        p_limit: 200,
+        p_offset: 0,
+      });
+      if (error) throw new Error(error.message);
+      let items = (
+        (data ?? []) as Array<{
+          id: string;
+          slug: string;
+          title: string;
+          description: string;
+          status: TaskStatus;
+          reward_amount_minor: number;
+          reward_currency: CurrencyCode;
+          claim_policy: TaskClaimPolicy;
+          max_claims: number;
+          eligibility: Record<string, unknown>;
+          starts_at: string | null;
+          ends_at: string | null;
+          version: number;
+          published_at: string | null;
+          created_at: string;
+          requirements: Array<{
+            id: string;
+            kind: TaskRequirementKind;
+            config: Record<string, unknown>;
+            required: boolean;
+            position: number;
+          }>;
+          claims: { total?: number; pending?: number; rewarded?: number; rejected?: number };
+        }>
+      ).map((t) => ({
+        id: t.id,
+        slug: t.slug,
+        title: t.title,
+        description: t.description,
+        status: t.status,
+        rewardAmount: t.reward_amount_minor,
+        rewardCurrency: t.reward_currency,
+        claimPolicy: t.claim_policy,
+        maxClaims: t.max_claims,
+        eligibility: t.eligibility,
+        startsAt: t.starts_at,
+        endsAt: t.ends_at,
+        version: t.version,
+        publishedAt: t.published_at,
+        createdAt: t.created_at,
+        requirements: t.requirements.map((r) => ({
+          id: r.id,
+          kind: r.kind,
+          config: r.config,
+          required: r.required,
+          position: r.position,
+        })),
+        claims: {
+          total: t.claims.total ?? 0,
+          pending: t.claims.pending ?? 0,
+          rewarded: t.claims.rewarded ?? 0,
+          rejected: t.claims.rejected ?? 0,
+        },
+      }));
+      if (filter?.status && filter.status.length > 1)
+        items = items.filter((t) => filter.status!.includes(t.status));
+      items = items.filter((t) => match([t.title, t.slug], filter?.query));
+      items = applySortOn(items, filter?.sort, "createdAt");
+      return pageOf(items, filter);
+    },
+
+    async upsertRewardTask(input) {
+      if (!(await hasSession())) return domain.upsertRewardTask(input);
+      const { data, error } = await client.rpc("admin_upsert_reward_task", {
+        p_id: input.taskId ?? null,
+        p_fields: input.fields,
+        p_request_id: input.idempotencyKey,
+      });
+      if (error) return { ok: false, auditId: "", message: error.message };
+      const task = data as { id: string; slug: string; status: string };
+      return {
+        ok: true,
+        auditId: input.idempotencyKey,
+        message: `Task ${task.slug} saved as ${task.status}.`,
+        taskId: task.id,
+      };
+    },
+
+    async setTaskStatus(input) {
+      if (!(await hasSession())) return domain.setTaskStatus(input);
+      const { error } = await client.rpc("admin_set_task_status", {
+        p_task_id: input.taskId,
+        p_to: input.to,
+        p_request_id: input.idempotencyKey,
+      });
+      if (error) return { ok: false, auditId: "", message: error.message };
+      return { ok: true, auditId: input.idempotencyKey, message: `Task moved to ${input.to}.` };
+    },
+
+    async upsertTaskRequirement(input) {
+      if (!(await hasSession())) return domain.upsertTaskRequirement(input);
+      const { error } = await client.rpc("admin_upsert_task_requirement", {
+        p_task_id: input.taskId,
+        p_req_id: input.requirementId ?? null,
+        p_fields: input.fields,
+        p_request_id: input.idempotencyKey,
+      });
+      if (error) return { ok: false, auditId: "", message: error.message };
+      return { ok: true, auditId: input.idempotencyKey, message: "Requirement saved." };
+    },
+
+    async listTaskClaims(filter) {
+      if (!(await hasSession())) return domain.listTaskClaims(filter);
+      const { data, error } = await client.rpc("admin_list_task_claims", {
+        p_task_id: filter?.taskId ?? null,
+        p_status: filter?.status?.length === 1 ? filter.status[0] : null,
+        p_limit: 500,
+        p_offset: 0,
+      });
+      if (error) throw new Error(error.message);
+      let items = (
+        (data ?? []) as Array<{
+          id: string;
+          task_id: string;
+          task_title: string;
+          user_id: string;
+          user_display_name: string | null;
+          status: TaskClaimStatus;
+          attempt_no: number;
+          evidence: Record<string, unknown>;
+          claim_deadline: string | null;
+          resolved_at: string | null;
+          reviewed_by: string | null;
+          created_at: string;
+          legs: Array<{
+            id: string;
+            requirement_id: string;
+            kind: TaskRequirementKind;
+            status: TaskLegStatus;
+            verified_at: string | null;
+            verified_by: string | null;
+            detail: Record<string, unknown>;
+          }>;
+        }>
+      ).map((c) => ({
+        id: c.id,
+        taskId: c.task_id,
+        taskTitle: c.task_title,
+        userId: c.user_id,
+        userDisplayName: c.user_display_name ?? "—",
+        status: c.status,
+        attemptNo: c.attempt_no,
+        evidence: c.evidence,
+        claimDeadline: c.claim_deadline,
+        resolvedAt: c.resolved_at,
+        reviewedBy: c.reviewed_by,
+        createdAt: c.created_at,
+        legs: c.legs.map((l) => ({
+          id: l.id,
+          requirementId: l.requirement_id,
+          kind: l.kind,
+          status: l.status,
+          verifiedAt: l.verified_at,
+          verifiedBy: l.verified_by,
+          detail: l.detail,
+        })),
+      }));
+      if (filter?.status && filter.status.length > 1)
+        items = items.filter((c) => filter.status!.includes(c.status));
+      items = items.filter((c) => match([c.userDisplayName, c.taskTitle, c.id], filter?.query));
+      items = applySortOn(items, filter?.sort, "createdAt");
+      return pageOf(items, filter);
+    },
+
+    async reviewTaskClaim(input) {
+      if (!(await hasSession())) return domain.reviewTaskClaim(input);
+      const { data, error } = await client.rpc("admin_review_task_claim", {
+        p_claim_id: input.claimId,
+        p_leg_id: input.legId,
+        p_decision: input.decision,
+        p_note: input.reason ?? null,
+        p_request_id: input.idempotencyKey,
+      });
+      if (error) return { ok: false, auditId: "", message: error.message };
+      return { ok: true, auditId: input.idempotencyKey, message: `Claim now ${String(data)}.` };
     },
   };
 }

@@ -7,7 +7,12 @@ import { REFERRAL_STATUS, formatBps, formatListDate, formatMoney } from "@rentbr
 import { MOCK_NOW } from "@rentbrown/mock-data";
 
 import type { ReferralRecord } from "@rentbrown/types";
-import { useReferrals, useReferralSummary } from "../../../../src/data/hooks";
+import {
+  useClaimRewardTask,
+  useReferrals,
+  useReferralSummary,
+  useRewardTasks,
+} from "../../../../src/data/hooks";
 import { useSession } from "../../../../src/data/provider";
 import { t } from "../../../../src/theme";
 import {
@@ -40,13 +45,19 @@ export default function Referrals() {
   const session = useSession();
   const summary = useReferralSummary();
   const referrals = useReferrals();
+  const rewardTasks = useRewardTasks();
+  const claimTask = useClaimRewardTask();
   const { toast } = useToast();
 
   if (!session.isLoading && !session.data) {
     return (
       <Screen bottomPad={110}>
         <HeaderBar back title="Referrals" />
-        <EmptyState title="Sign in to see referrals" actionLabel="Sign in" onAction={() => router.push("/(auth)/login")} />
+        <EmptyState
+          title="Sign in to see referrals"
+          actionLabel="Sign in"
+          onAction={() => router.push("/(auth)/login")}
+        />
       </Screen>
     );
   }
@@ -103,30 +114,48 @@ export default function Referrals() {
               variant="outline"
               label="Share link"
               icon={<Share2 size={14} color={t.text.primary} />}
-              onPress={() => void Share.share({ message: `Join me on RentBrown with code ${s.code}: ${s.shareUrl}` })}
+              onPress={() =>
+                void Share.share({
+                  message: `Join me on RentBrown with code ${s.code}: ${s.shareUrl}`,
+                })
+              }
             />
           </Card>
 
           <Card style={{ gap: 8 }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
               <Caption tone="muted">How rewards work</Caption>
               <Caption tone="muted">{s.policy.version}</Caption>
             </View>
             <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
               <BodySm tone="muted">Signup reward</BodySm>
-              <BodySm style={{ fontWeight: "700" }}>{formatMoney(s.policy.signupReward, s.policy.currency)}</BodySm>
+              <BodySm style={{ fontWeight: "700" }}>
+                {formatMoney(s.policy.signupReward, s.policy.currency)}
+              </BodySm>
             </View>
             <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
               <BodySm tone="muted">Qualifying deposit</BodySm>
-              <BodySm style={{ fontWeight: "700" }}>{formatMoney(s.policy.qualifyingDeposit, s.policy.currency)}</BodySm>
+              <BodySm style={{ fontWeight: "700" }}>
+                {formatMoney(s.policy.qualifyingDeposit, s.policy.currency)}
+              </BodySm>
             </View>
             <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
               <BodySm tone="muted">Deposit referral</BodySm>
-              <BodySm style={{ fontWeight: "700" }}>{formatBps(s.policy.depositReferralBps)} of deposits</BodySm>
+              <BodySm style={{ fontWeight: "700" }}>
+                {formatBps(s.policy.depositReferralBps)} of deposits
+              </BodySm>
             </View>
             <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
               <BodySm tone="muted">Deposit cap</BodySm>
-              <BodySm style={{ fontWeight: "700" }}>{formatMoney(s.policy.depositReferralCap, s.policy.currency)} / person</BodySm>
+              <BodySm style={{ fontWeight: "700" }}>
+                {formatMoney(s.policy.depositReferralCap, s.policy.currency)} / person
+              </BodySm>
             </View>
             <Caption tone="muted">{s.policy.qualificationRule}</Caption>
           </Card>
@@ -147,17 +176,113 @@ export default function Referrals() {
             ))}
           </Card>
 
+          {(rewardTasks.data ?? []).length > 0 ? (
+            <Card padded={false} style={{ paddingVertical: 6 }}>
+              <Body style={{ fontWeight: "800", paddingHorizontal: 14, paddingTop: 8 }}>
+                Task rewards
+              </Body>
+              {(rewardTasks.data ?? []).map((task) => {
+                const my = task.myClaim;
+                const open = my && my.status !== "EXPIRED" && my.status !== "REJECTED";
+                return (
+                  <View
+                    key={task.id}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 10,
+                      paddingHorizontal: 14,
+                      paddingVertical: 8,
+                    }}
+                  >
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <BodySm style={{ fontWeight: "700" }} numberOfLines={1}>
+                        {task.title}
+                      </BodySm>
+                      <Caption tone="muted" numberOfLines={2}>
+                        {task.description}
+                      </Caption>
+                    </View>
+                    <View style={{ alignItems: "flex-end", gap: 4 }}>
+                      <MoneyFigure
+                        minor={task.rewardAmount}
+                        currency={task.rewardCurrency}
+                        size="xs"
+                      />
+                      {my?.status === "REWARDED" ? (
+                        <StatusPill size="xs" tone="success" label="Rewarded" />
+                      ) : open ? (
+                        <StatusPill
+                          size="xs"
+                          tone="pending"
+                          label={my!.status === "MANUAL_REVIEW" ? "Under review" : "Verifying"}
+                        />
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          label={my ? "Try again" : "Earn"}
+                          loading={claimTask.isPending}
+                          onPress={() =>
+                            claimTask.mutate(
+                              {
+                                taskId: task.id,
+                                idempotencyKey: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                              },
+                              {
+                                onSuccess: (r) =>
+                                  toast(
+                                    r.pendingLinks.length > 0
+                                      ? `Claim started — link ${r.pendingLinks.join(", ").toLowerCase()} to finish`
+                                      : `Claim ${r.status.toLowerCase().replace(/_/g, " ")}`,
+                                  ),
+                                onError: (e) =>
+                                  toast(
+                                    e instanceof Error ? e.message : "Couldn't start the claim.",
+                                  ),
+                              },
+                            )
+                          }
+                        />
+                      )}
+                    </View>
+                  </View>
+                );
+              })}
+            </Card>
+          ) : null}
+
           <Card padded={false} style={{ paddingVertical: 6 }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 14, paddingTop: 8 }}>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                paddingHorizontal: 14,
+                paddingTop: 8,
+              }}
+            >
               <Body style={{ fontWeight: "800" }}>Recent referrals</Body>
-              <Caption tone="brand" onPress={() => router.push("/(tabs)/account/referrals/history")}>
+              <Caption
+                tone="brand"
+                onPress={() => router.push("/(tabs)/account/referrals/history")}
+              >
                 Full history
               </Caption>
             </View>
             {(referrals.data ?? []).slice(0, 5).map((r) => {
               const st = REFERRAL_STATUS[r.status];
               return (
-                <View key={r.id} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 8 }}>
+                <View
+                  key={r.id}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                  }}
+                >
                   <Avatar initials={r.displayName.slice(0, 2).toUpperCase()} size={34} />
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <BodySm style={{ fontWeight: "700" }} numberOfLines={1}>
