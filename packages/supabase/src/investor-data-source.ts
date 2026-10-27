@@ -28,6 +28,7 @@ import type {
   KycSummary,
   Opportunity,
   OpportunityFilter,
+  PaymentProvider,
   PaymentStatus,
   PayoutMethod,
   ProofDocument,
@@ -1606,16 +1607,32 @@ export function createSupabaseInvestorDataSource(
         max_minor?: number | null;
         expiry_minutes?: number | null;
         providers?: Record<string, boolean>;
+        currencies?: Record<
+          string,
+          { min_minor?: number | null; providers?: Record<string, boolean> }
+        >;
       };
+      const currencies = o.currencies
+        ? Object.fromEntries(
+            Object.entries(o.currencies).map(([code, c]) => [
+              code,
+              {
+                minDeposit: c.min_minor ?? null,
+                providers: (c.providers ?? {}) as Partial<Record<PaymentProvider, boolean>>,
+              },
+            ]),
+          )
+        : undefined;
       return {
         currency: "NGN",
         minDeposit: o.min_minor ?? 0,
         maxDeposit: o.max_minor ?? null,
         expiryMinutes: o.expiry_minutes ?? null,
-        providers: (["PAYSTACK", "KORAPAY"] as const).map((id) => ({
+        providers: (["PAYSTACK", "KORAPAY", "BACHS"] as const).map((id) => ({
           id,
           enabled: !!o.providers?.[id],
         })),
+        currencies,
       };
     },
     // Real deposit init through the initialize-deposit Edge Function —
@@ -1627,10 +1644,13 @@ export function createSupabaseInvestorDataSource(
       } = await client.auth.getSession();
       if (!session) return domain.createDeposit(input);
       const provider = input.provider ?? "PAYSTACK";
+      const currency = input.currency ?? (provider === "BACHS" ? "USD" : "NGN");
       const { data, error } = await client.functions.invoke("initialize-deposit", {
         body: {
           amount_minor: input.amount,
           provider,
+          currency,
+          payment_method_types: input.paymentMethodTypes,
           idempotency_key: input.idempotencyKey,
         },
       });
@@ -1645,13 +1665,14 @@ export function createSupabaseInvestorDataSource(
         id: init.deposit_id,
         reference: init.reference,
         amount: input.amount,
-        currency: "NGN",
+        currency,
         method: input.method,
         status: wireStatus(init.status),
         fee: 0,
         createdAt: new Date().toISOString(),
         creditedAt: null,
         checkoutUrl: init.checkout_url ?? null,
+        provider,
       };
       return intent;
     },
@@ -1686,6 +1707,7 @@ export function createSupabaseInvestorDataSource(
         createdAt: d.created_at,
         creditedAt: d.confirmed_at,
         checkoutUrl: d.metadata?.checkout_url ?? null,
+        provider: d.provider as DepositIntent["provider"],
       };
       return intent;
     },

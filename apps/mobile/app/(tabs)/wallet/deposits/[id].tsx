@@ -39,7 +39,11 @@ export default function DepositStatus() {
     return (
       <Screen bottomPad={110}>
         <HeaderBar back title="Deposit" />
-        <EmptyState title="Deposit not found" actionLabel="Back to wallet" onAction={() => router.replace("/(tabs)/wallet")} />
+        <EmptyState
+          title="Deposit not found"
+          actionLabel="Back to wallet"
+          onAction={() => router.replace("/(tabs)/wallet")}
+        />
       </Screen>
     );
   }
@@ -49,7 +53,10 @@ export default function DepositStatus() {
     <Screen bottomPad={110}>
       <HeaderBar back title="Deposit" eyebrow={status.label} />
       <MoneyFigure minor={d.amount} currency={d.currency} size="xl" />
-      <Caption tone="muted">Reference {d.reference} · {d.method === "BANK_TRANSFER" ? "Bank transfer" : "Card"}</Caption>
+      <Caption tone="muted">
+        Reference {d.reference} ·{" "}
+        {d.method === "BANK_TRANSFER" ? "Bank transfer" : d.method === "CRYPTO" ? "Crypto" : "Card"}
+      </Caption>
 
       {d.status === "AWAITING_TRANSFER" ? (
         <>
@@ -59,26 +66,60 @@ export default function DepositStatus() {
             title="Make your transfer"
             body="Use only a bank account in your name. Your wallet updates after confirmation."
           />
-          {d.transferInstructions ? <TransferInstructions account={d.transferInstructions} amount={d.amount} /> : null}
-          <Button variant="outline" label="I've sent it" onPress={() => toast("We'll confirm once your bank settles")} />
+          {d.transferInstructions ? (
+            <TransferInstructions account={d.transferInstructions} amount={d.amount} />
+          ) : null}
+          <Button
+            variant="outline"
+            label="I've sent it"
+            onPress={() => toast("We'll confirm once your bank settles")}
+          />
         </>
       ) : d.status === "CONFIRMING" ? (
-        <StatePanel tone="pending" icon={<Clock size={18} color={t.status.pending.fg} />} title="Confirming your transfer" body="This usually takes a few minutes after your bank settles." />
+        <StatePanel
+          tone="pending"
+          icon={<Clock size={18} color={t.status.pending.fg} />}
+          title="Confirming your transfer"
+          body="This usually takes a few minutes after your bank settles."
+        />
       ) : d.status === "CREDITED" ? (
-        <StatePanel tone="success" icon={<CheckCircle2 size={18} color={t.status.success.fg} />} title="Deposit credited" body={`${formatMoney(d.amount, d.currency)} is now in your available balance.`} />
+        <StatePanel
+          tone="success"
+          icon={<CheckCircle2 size={18} color={t.status.success.fg} />}
+          title="Deposit credited"
+          body={`${formatMoney(d.amount, d.currency)} is now in your available balance.`}
+        />
       ) : (
-        <StatePanel tone="error" icon={<XCircle size={18} color={t.status.error.fg} />} title={status.label} body="This deposit did not complete." />
+        <StatePanel
+          tone="error"
+          icon={<XCircle size={18} color={t.status.error.fg} />}
+          title={status.label}
+          body="This deposit did not complete."
+        />
       )}
 
       <Card>
         <DataRow label="Amount" value={formatMoney(d.amount, d.currency)} strong />
-        <DataRow label="Method" value={d.method === "BANK_TRANSFER" ? "Bank transfer" : "Debit card"} />
+        <DataRow
+          label="Method"
+          value={
+            d.method === "BANK_TRANSFER"
+              ? "Bank transfer"
+              : d.method === "CRYPTO"
+                ? "Crypto"
+                : "Debit card"
+          }
+        />
         <DataRow label="Fee" value={d.fee === 0 ? "None" : formatMoney(d.fee, d.currency)} />
         <DataRow label="Created" value={formatDateTime(d.createdAt)} />
         {d.creditedAt ? <DataRow label="Credited" value={formatDateTime(d.creditedAt)} /> : null}
         <DataRow label="Reference" value={d.reference} copyable={d.reference} />
       </Card>
-      <Button variant="outline" label="Back to wallet" onPress={() => router.replace("/(tabs)/wallet")} />
+      <Button
+        variant="outline"
+        label="Back to wallet"
+        onPress={() => router.replace("/(tabs)/wallet")}
+      />
     </Screen>
   );
 }

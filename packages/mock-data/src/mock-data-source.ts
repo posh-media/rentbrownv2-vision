@@ -572,7 +572,15 @@ export function createMockDataSource(options: MockDataSourceOptions = {}): Inves
           providers: [
             { id: "PAYSTACK", enabled: true },
             { id: "KORAPAY", enabled: true },
+            { id: "BACHS", enabled: true },
           ],
+          currencies: {
+            NGN: {
+              minDeposit: state.wallet.policies.minDeposit,
+              providers: { PAYSTACK: true, KORAPAY: true },
+            },
+            USD: { minDeposit: 500, providers: { BACHS: true } },
+          },
         }),
       ),
     createDeposit: (input) =>
@@ -584,12 +592,13 @@ export function createMockDataSource(options: MockDataSourceOptions = {}): Inves
           id: `dep_${reference.toLowerCase()}`,
           reference,
           amount: input.amount,
-          currency: "NGN",
+          currency: input.currency ?? "NGN",
           method: input.method,
           status: input.method === "BANK_TRANSFER" ? "AWAITING_TRANSFER" : "CONFIRMING",
           fee: 0,
           createdAt: now,
           creditedAt: null,
+          provider: input.provider ?? "PAYSTACK",
           transferInstructions:
             input.method === "BANK_TRANSFER"
               ? {

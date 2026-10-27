@@ -85,9 +85,17 @@ export default function DepositStatusPage() {
             {d?.checkoutUrl ? (
               <>
                 <p className="mt-4 text-sm text-muted-foreground">
-                  Continue to the secure {d.method === "CARD" ? "Paystack" : "KoraPay"} checkout to pay{" "}
-                  <span className="font-semibold text-foreground">{formatMoney(d.amount, d.currency)}</span>.
-                  Your wallet credits automatically once the provider confirms.
+                  Continue to the secure{" "}
+                  {d.provider === "KORAPAY"
+                    ? "KoraPay"
+                    : d.provider === "BACHS"
+                      ? "Bachs"
+                      : "Paystack"}{" "}
+                  checkout to pay{" "}
+                  <span className="font-semibold text-foreground">
+                    {formatMoney(d.amount, d.currency)}
+                  </span>
+                  . Your wallet credits automatically once the provider confirms.
                 </p>
                 <div className="mt-6 flex flex-wrap gap-2">
                   <Button asChild>
@@ -116,7 +124,10 @@ export default function DepositStatusPage() {
                   Use only a bank account in your name. Your wallet updates after confirmation.
                 </p>
                 <div className="mt-6 flex flex-wrap gap-2">
-                  <Button variant="outline" onClick={() => toast.success("Thanks — we'll confirm within minutes")}>
+                  <Button
+                    variant="outline"
+                    onClick={() => toast.success("Thanks — we'll confirm within minutes")}
+                  >
                     I&apos;ve sent it
                   </Button>
                   <Button variant="ghost" asChild>
@@ -143,8 +154,19 @@ export default function DepositStatusPage() {
             <div className="mt-4">
               <DataRow label="Reference" value={d?.reference ?? "—"} />
               <DataRow label="Amount" value={d ? formatMoney(d.amount, d.currency) : "—"} strong />
-              <DataRow label="Method" value={d?.method === "CARD" ? "Debit card" : "Bank transfer"} />
-              {d?.creditedAt ? <DataRow label="Credited" value={formatDateTime(d.creditedAt)} /> : null}
+              <DataRow
+                label="Method"
+                value={
+                  d?.method === "CARD"
+                    ? "Debit card"
+                    : d?.method === "CRYPTO"
+                      ? "Crypto"
+                      : "Bank transfer"
+                }
+              />
+              {d?.creditedAt ? (
+                <DataRow label="Credited" value={formatDateTime(d.creditedAt)} />
+              ) : null}
             </div>
             <div className="mt-6 flex flex-wrap gap-2">
               <Button asChild>

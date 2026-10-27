@@ -31,8 +31,10 @@ interface Overview {
 const DEMO: Overview = {
   config: {
     "payment.endpoint.environment": "demo",
-    "payment.endpoint.paystack.webhook": "https://example.supabase.co/functions/v1/payment-webhook-paystack",
-    "payment.endpoint.korapay.webhook": "https://example.supabase.co/functions/v1/payment-webhook-korapay",
+    "payment.endpoint.paystack.webhook":
+      "https://example.supabase.co/functions/v1/payment-webhook-paystack",
+    "payment.endpoint.korapay.webhook":
+      "https://example.supabase.co/functions/v1/payment-webhook-korapay",
     "payment.provider.paystack.enabled": "true",
     "payment.provider.korapay.enabled": "true",
     "payment.provider.paystack.secret_set": "false",
@@ -40,6 +42,11 @@ const DEMO: Overview = {
     "payment.provider.korapay.secret_set": "false",
     "payment.provider.korapay.secret_last4": "",
     "payment.provider.korapay.public_key": "",
+    "payment.provider.bachs.enabled": "false",
+    "payment.provider.bachs.secret_set": "false",
+    "payment.provider.bachs.secret_last4": "",
+    "payment.provider.bachs.webhook_secret_set": "false",
+    "payment.endpoint.bachs.webhook": "",
     "payment.deposit.max_minor": "",
     "payment.deposit.expiry_minutes": "",
     "withdrawal.webhook.url": "https://hook.eu2.make.com/…",
@@ -76,13 +83,18 @@ function CopyRow({ label, value, mono = true }: { label: string; value: string; 
       await navigator.clipboard.writeText(value);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
-    } catch { /* clipboard unavailable */ }
+    } catch {
+      /* clipboard unavailable */
+    }
   };
   return (
     <div className="flex items-start justify-between gap-3 border-b border-border py-2.5 last:border-0">
       <span className="text-xs font-semibold text-muted-foreground">{label}</span>
       <span className="flex items-center gap-1.5">
-        <span className={`max-w-65 truncate text-xs font-semibold ${mono ? "font-mono" : ""}`} title={value}>
+        <span
+          className={`max-w-65 truncate text-xs font-semibold ${mono ? "font-mono" : ""}`}
+          title={value}
+        >
           {value || "—"}
         </span>
         {value ? (
@@ -92,7 +104,11 @@ function CopyRow({ label, value, mono = true }: { label: string; value: string; 
             aria-label={`Copy ${label}`}
             className="text-muted-foreground transition-colors hover:text-foreground"
           >
-            {copied ? <Check className="size-3.5 text-[var(--success-fg)]" /> : <Copy className="size-3.5" />}
+            {copied ? (
+              <Check className="size-3.5 text-[var(--success-fg)]" />
+            ) : (
+              <Copy className="size-3.5" />
+            )}
           </button>
         ) : null}
       </span>
@@ -120,16 +136,37 @@ function ProviderCard({
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-extrabold">{name}</h2>
         <StatusCell
-          status={status === "Ready" ? "CREDITED" : status === "Disabled" ? "neutral" : "AWAITING_TRANSFER"}
+          status={
+            status === "Ready"
+              ? "CREDITED"
+              : status === "Disabled"
+                ? "neutral"
+                : "AWAITING_TRANSFER"
+          }
           label={status}
         />
       </div>
       <CopyRow label="Enabled" value={enabled ? "Yes" : "No"} mono={false} />
-      <CopyRow label="Secret configured" value={secretSet ? "Yes" : "No — set provider secret"} mono={false} />
+      <CopyRow
+        label="Secret configured"
+        value={secretSet ? "Yes" : "No — set provider secret"}
+        mono={false}
+      />
       <CopyRow label="Secret ending" value={last4 ? `…${last4}` : "—"} />
       <CopyRow label="Webhook endpoint" value={endpoint} />
       {name === "KoraPay" ? (
         <CopyRow label="Public key" value={cfg["payment.provider.korapay.public_key"] ?? "—"} />
+      ) : null}
+      {name === "Bachs" ? (
+        <CopyRow
+          label="Webhook secret configured"
+          value={
+            flag(cfg["payment.provider.bachs.webhook_secret_set"])
+              ? "Yes"
+              : "No — set BACHS_WEBHOOK_SECRET"
+          }
+          mono={false}
+        />
       ) : null}
     </section>
   );
@@ -173,12 +210,16 @@ function Payments() {
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <div className="financial-card p-4">
           <p className="eyebrow text-muted-foreground">Review required</p>
-          <p className="tabular mt-2 text-2xl font-extrabold">{data.review.deposits_review_required}</p>
+          <p className="tabular mt-2 text-2xl font-extrabold">
+            {data.review.deposits_review_required}
+          </p>
           <p className="mt-1 text-xs text-muted-foreground">Deposits awaiting finance</p>
         </div>
         <div className="financial-card p-4">
           <p className="eyebrow text-muted-foreground">Unresolved events</p>
-          <p className="tabular mt-2 text-2xl font-extrabold">{data.review.provider_events_unresolved}</p>
+          <p className="tabular mt-2 text-2xl font-extrabold">
+            {data.review.provider_events_unresolved}
+          </p>
           <p className="mt-1 text-xs text-muted-foreground">Provider events needing attention</p>
         </div>
         <div className="financial-card p-4">
@@ -193,9 +234,10 @@ function Payments() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-3">
         <ProviderCard name="Paystack" prefix="payment.provider.paystack" cfg={cfg} />
         <ProviderCard name="KoraPay" prefix="payment.provider.korapay" cfg={cfg} />
+        <ProviderCard name="Bachs" prefix="payment.provider.bachs" cfg={cfg} />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -216,8 +258,16 @@ function Payments() {
         <section className="financial-card p-4">
           <h2 className="eyebrow mb-3 text-muted-foreground">Deposit policy</h2>
           <CopyRow label="Currency" value="NGN" mono={false} />
-          <CopyRow label="Maximum deposit" value={maxMinor ? `${Number(maxMinor) / 100} (minor)` : "Not configured"} mono={false} />
-          <CopyRow label="Pending expiry" value={expiry ? `${expiry} min` : "Not configured"} mono={false} />
+          <CopyRow
+            label="Maximum deposit"
+            value={maxMinor ? `${Number(maxMinor) / 100} (minor)` : "Not configured"}
+            mono={false}
+          />
+          <CopyRow
+            label="Pending expiry"
+            value={expiry ? `${expiry} min` : "Not configured"}
+            mono={false}
+          />
         </section>
       </div>
     </div>

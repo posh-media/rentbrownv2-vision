@@ -578,8 +578,8 @@ check("investor gets nothing from admin RPC", r.rows.length === 0);
 // ── admin_config: seeds, validation, history, audit ──────────────────────────
 r = await admin.query("select count(*)::int c from public.admin_config");
 check(
-  "admin_config seeded (10 phase-3 + 16 payment + 3 maturity + 10 phase-8 + 13 phase-9 keys)",
-  r.rows[0].c === 52,
+  "admin_config seeded (10 phase-3 + 16 payment + 3 maturity + 10 phase-8 + 13 phase-9 + 6 phase-10 keys)",
+  r.rows[0].c === 58,
   `found ${r.rows[0].c}`,
 );
 r = await admin.query(
@@ -1222,7 +1222,7 @@ const first = (r) => r.rows[0];
 const fundViaDeposit = async (uid, amount, tag) => {
   let d = first(
     await asUserSession(uid, () =>
-      admin.query(`select * from public.request_deposit($1::bigint,'PAYSTACK',$2)`, [
+      admin.query(`select * from public.request_deposit($1::bigint,'PAYSTACK','NGN',$2)`, [
         amount,
         `fund-${tag}`,
       ]),
@@ -1250,13 +1250,13 @@ console.log("── Phase 5: deposits ──────────────
 
 // anonymous / unauthenticated
 await expectFail("anon cannot call request_deposit", () =>
-  asAnon(`select * from public.request_deposit(500000,'PAYSTACK','k')`),
+  asAnon(`select * from public.request_deposit(500000,'PAYSTACK','NGN','k')`),
 );
 
 // below minimum (deposit.min_minor.NGN = 100000)
 await expectFail("deposit below minimum rejected", () =>
   asUserSession(uid4, () =>
-    admin.query(`select * from public.request_deposit(50000,'PAYSTACK','min-test')`),
+    admin.query(`select * from public.request_deposit(50000,'PAYSTACK','NGN','min-test')`),
   ),
 );
 
@@ -1266,7 +1266,7 @@ await admin.query(
 );
 await expectFail("disabled provider rejected", () =>
   asUserSession(uid4, () =>
-    admin.query(`select * from public.request_deposit(500000,'PAYSTACK','disabled-test')`),
+    admin.query(`select * from public.request_deposit(500000,'PAYSTACK','NGN','disabled-test')`),
   ),
 );
 await admin.query(
@@ -1276,7 +1276,7 @@ await admin.query(
 // valid request — INITIATED, NGN forced, server reference
 let dep = first(
   await asUserSession(uid4, () =>
-    admin.query(`select * from public.request_deposit(500000,'PAYSTACK','dep-1')`),
+    admin.query(`select * from public.request_deposit(500000,'PAYSTACK','NGN','dep-1')`),
   ),
 );
 check(
@@ -1290,7 +1290,7 @@ check("idempotency key namespaced", dep.idempotency_key === `dep:init:${uid4}:de
 // client retry converges
 let dep1b = first(
   await asUserSession(uid4, () =>
-    admin.query(`select * from public.request_deposit(500000,'PAYSTACK','dep-1')`),
+    admin.query(`select * from public.request_deposit(500000,'PAYSTACK','NGN','dep-1')`),
   ),
 );
 check("deposit init idempotent", dep1b.id === dep.id);
@@ -1387,7 +1387,7 @@ check("exactly one funding journal", r.rows[0].c === 1);
 // amount mismatch → REVIEW_REQUIRED, no credit
 let depM = first(
   await asUserSession(uid4, () =>
-    admin.query(`select * from public.request_deposit(300000,'KORAPAY','dep-mismatch')`),
+    admin.query(`select * from public.request_deposit(300000,'KORAPAY','NGN','dep-mismatch')`),
   ),
 );
 depM = first(
@@ -1411,7 +1411,7 @@ check("mismatch not credited", depM.funding_journal_id === null);
 // currency mismatch → REVIEW_REQUIRED
 let depC = first(
   await asUserSession(uid4, () =>
-    admin.query(`select * from public.request_deposit(200000,'PAYSTACK','dep-cur')`),
+    admin.query(`select * from public.request_deposit(200000,'PAYSTACK','NGN','dep-cur')`),
   ),
 );
 depC = first(
@@ -1434,7 +1434,7 @@ check(
 // late success on CANCELLED deposit → REVIEW_REQUIRED (not credited)
 let depL = first(
   await asUserSession(uid4, () =>
-    admin.query(`select * from public.request_deposit(150000,'PAYSTACK','dep-late')`),
+    admin.query(`select * from public.request_deposit(150000,'PAYSTACK','NGN','dep-late')`),
   ),
 );
 depL = first(
@@ -1463,7 +1463,7 @@ check("late success not credited", r.rows[0].available_minor === "500000");
 // provider reference uniqueness — second init with same ref on another deposit
 let depX = first(
   await asUserSession(uid4, () =>
-    admin.query(`select * from public.request_deposit(100000,'PAYSTACK','dep-dup')`),
+    admin.query(`select * from public.request_deposit(100000,'PAYSTACK','NGN','dep-dup')`),
   ),
 );
 depX = first(
@@ -1473,7 +1473,7 @@ depX = first(
 );
 let depY = first(
   await asUserSession(uid4, () =>
-    admin.query(`select * from public.request_deposit(100000,'PAYSTACK','dep-dup2')`),
+    admin.query(`select * from public.request_deposit(100000,'PAYSTACK','NGN','dep-dup2')`),
   ),
 );
 await expectFail("duplicate provider_reference rejected", () =>
@@ -1554,7 +1554,7 @@ check("reversal debited wallet", r.rows[0].available_minor === "500000", r.rows[
 // reversal with insufficient cover → REVIEW_REQUIRED, never negative
 let depI = first(
   await asUserSession(uid4, () =>
-    admin.query(`select * from public.request_deposit(100000,'PAYSTACK','dep-insuf')`),
+    admin.query(`select * from public.request_deposit(100000,'PAYSTACK','NGN','dep-insuf')`),
   ),
 );
 depI = first(
@@ -1619,7 +1619,7 @@ check(
 // concurrent confirm — two sessions race; exactly one credit
 let depR = first(
   await asUserSession(uid4, () =>
-    admin.query(`select * from public.request_deposit(250000,'PAYSTACK','dep-race')`),
+    admin.query(`select * from public.request_deposit(250000,'PAYSTACK','NGN','dep-race')`),
   ),
 );
 depR = first(
@@ -1816,7 +1816,7 @@ check(
 // reject path — hold released. Fund the user first so a min-sized request fits.
 let depF = first(
   await asUserSession(uid4, () =>
-    admin.query(`select * from public.request_deposit(200000,'PAYSTACK','dep-fund2')`),
+    admin.query(`select * from public.request_deposit(200000,'PAYSTACK','NGN','dep-fund2')`),
   ),
 );
 depF = first(
@@ -1916,7 +1916,7 @@ await admin.query(
 );
 let depE = first(
   await asUserSession(uid4, () =>
-    admin.query(`select * from public.request_deposit(100000,'PAYSTACK','dep-exp')`),
+    admin.query(`select * from public.request_deposit(100000,'PAYSTACK','NGN','dep-exp')`),
   ),
 );
 depE = first(
@@ -1999,6 +1999,116 @@ await expectFail("investor cannot call confirm_deposit", () =>
 // direct writes blocked even with flags unset (service role, no flag)
 await expectFail("service direct deposit update blocked by guard", () =>
   asService(() => admin.query(`update public.deposits set status='FAILED' where id='${dep.id}'`)),
+);
+
+// ── Phase 10A: Bachs USD rail ───────────────────────────────────────────────
+console.log("── Phase 10A: Bachs deposits ─────────────────");
+
+// Provider ships disabled until Edge Function secrets are configured.
+let bo = first(await asUserSession(uid2, () => admin.query(`select public.deposit_options() o`))).o;
+check("options expose disabled Bachs", bo.providers.BACHS === false, JSON.stringify(bo.providers));
+check("options expose USD corridor", bo.currencies?.USD?.providers?.BACHS === false);
+await expectFail("disabled Bachs provider rejected", () =>
+  asUserSession(uid2, () =>
+    admin.query(`select * from public.request_deposit(1000,'BACHS','USD','bachs-off')`),
+  ),
+);
+
+// Corridor enforcement is server-side.
+await admin.query(
+  `update public.admin_config set is_active=true, value='true' where key='payment.provider.bachs.enabled'`,
+);
+await expectFail("Bachs rejects NGN deposits", () =>
+  asUserSession(uid2, () =>
+    admin.query(`select * from public.request_deposit(1000,'BACHS','NGN','bachs-ngn')`),
+  ),
+);
+await expectFail("Paystack rejects USD deposits", () =>
+  asUserSession(uid2, () =>
+    admin.query(`select * from public.request_deposit(1000,'PAYSTACK','USD','ps-usd')`),
+  ),
+);
+await expectFail("Bachs below USD minimum rejected", () =>
+  asUserSession(uid2, () =>
+    admin.query(`select * from public.request_deposit(100,'BACHS','USD','bachs-min')`),
+  ),
+);
+
+// Valid USD deposit walks the same pipeline and credits the USD wallet.
+let bdep = first(
+  await asUserSession(uid2, () =>
+    admin.query(`select * from public.request_deposit(250000,'BACHS','USD','bachs-1')`),
+  ),
+);
+check("Bachs deposit INITIATED in USD", bdep.status === "INITIATED" && bdep.currency === "USD");
+bdep = first(
+  await asService(() =>
+    admin.query(
+      `select * from public.complete_deposit_init($1,'chk_test_1',null,'https://checkout.bachs.io/c/x')`,
+      [bdep.id],
+    ),
+  ),
+);
+check(
+  "Bachs deposit PENDING with checkout ref",
+  bdep.status === "PENDING" && bdep.provider_reference === "chk_test_1",
+);
+bdep = first(
+  await asService(() =>
+    admin.query(
+      `select * from public.confirm_deposit($1,$2::bigint,'USD',$3,'bachs:succeeded',null)`,
+      [bdep.id, 250000, "ch_test_1"],
+    ),
+  ),
+);
+check(
+  "Bachs deposit CONFIRMED",
+  bdep.status === "CONFIRMED" && Number(bdep.confirmed_amount_minor) === 250000,
+  `status=${bdep.status}`,
+);
+r = await admin.query(
+  `select a.currency, a.bucket
+     from public.ledger_entries e
+     join public.ledger_accounts a on a.id = e.account_id
+    where e.journal_id = $1`,
+  [bdep.funding_journal_id],
+);
+check(
+  "Bachs funding journal is USD",
+  r.rows.length === 2 && r.rows.every((x) => x.currency === "USD"),
+  JSON.stringify(r.rows),
+);
+r = await admin.query(
+  `select available_minor from public.wallets where user_id=$1 and currency='USD'`,
+  [uid2],
+);
+check("USD wallet credited", r.rows[0]?.available_minor === "250000", JSON.stringify(r.rows));
+
+// A refund observed via webhook reverses the USD deposit.
+bdep = first(
+  await asService(() =>
+    admin.query(`select * from public.refund_deposit($1,'bachs refund.paid',null,null)`, [bdep.id]),
+  ),
+);
+check("Bachs deposit refunded", bdep.status === "REFUNDED" && bdep.reversal_journal_id !== null);
+
+// Options now show Bachs enabled for USD only.
+bo = first(await asUserSession(uid2, () => admin.query(`select public.deposit_options() o`))).o;
+check(
+  "options expose enabled Bachs USD corridor",
+  bo.providers.BACHS === true &&
+    bo.currencies?.USD?.providers?.BACHS === true &&
+    bo.currencies?.NGN?.providers?.BACHS === undefined,
+);
+
+// admin overview surfaces Bachs config markers (secrets never returned).
+ov = first(
+  await asUserSession(uid1, () => admin.query(`select public.admin_payment_overview() ov`)),
+).ov;
+check(
+  "overview exposes Bachs markers",
+  ov.config["payment.provider.bachs.enabled"] === "true" &&
+    ov.config["payment.provider.bachs.secret_set"] === "false",
 );
 
 // ═══════════════════════════════════════════════════════════════════════════

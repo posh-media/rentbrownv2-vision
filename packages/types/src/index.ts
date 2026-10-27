@@ -334,7 +334,7 @@ export interface TransactionFilter {
 
 // ── Deposits ─────────────────────────────────────────────────────────────────
 
-export type DepositMethod = "BANK_TRANSFER" | "CARD";
+export type DepositMethod = "BANK_TRANSFER" | "CARD" | "CRYPTO";
 export type DepositStatus = "AWAITING_TRANSFER" | "CONFIRMING" | "CREDITED" | "FAILED" | "EXPIRED";
 
 export interface VirtualAccount {
@@ -356,12 +356,21 @@ export interface DepositIntent {
   createdAt: ISODateString;
   creditedAt: ISODateString | null;
   transferInstructions?: VirtualAccount;
-  /** Hosted provider checkout — open to complete payment (Paystack/KoraPay). */
+  /** Hosted provider checkout — open to complete payment (Paystack/KoraPay/Bachs). */
   checkoutUrl?: string | null;
+  /** Payment rail that initialized this deposit. */
+  provider?: PaymentProvider;
 }
 
-/** Payment rail behind a deposit — the wire-level choice (Phase 5B). */
-export type PaymentProvider = "PAYSTACK" | "KORAPAY";
+/** Payment rail behind a deposit — the wire-level choice (Phase 5B + Bachs). */
+export type PaymentProvider = "PAYSTACK" | "KORAPAY" | "BACHS";
+
+/** Per-currency deposit corridor detail from `deposit_options()`. */
+export interface DepositCurrencyOptions {
+  minDeposit: MinorUnits | null;
+  /** provider id → enabled for this currency */
+  providers: Partial<Record<PaymentProvider, boolean>>;
+}
 
 /** Non-secret init options served to the investor UI by `deposit_options()`. */
 export interface DepositOptions {
@@ -372,6 +381,8 @@ export interface DepositOptions {
   /** Null when no approved expiry window is configured. */
   expiryMinutes: number | null;
   providers: Array<{ id: PaymentProvider; enabled: boolean }>;
+  /** Per-currency corridors — USD exists only when a USD rail is enabled. */
+  currencies?: Partial<Record<CurrencyCode, DepositCurrencyOptions>>;
 }
 
 // ── Withdrawals ──────────────────────────────────────────────────────────────
@@ -959,6 +970,10 @@ export interface CreateDepositInput {
   idempotencyKey: string;
   /** Payment rail (real backend); mock ignores it. Defaults server-side to PAYSTACK. */
   provider?: PaymentProvider;
+  /** Deposit currency — server enforces the provider corridor. Defaults to NGN. */
+  currency?: CurrencyCode;
+  /** Optional provider corridor restriction (Bachs payment_method_types). */
+  paymentMethodTypes?: string[];
 }
 
 export interface RequestWithdrawalInput {
